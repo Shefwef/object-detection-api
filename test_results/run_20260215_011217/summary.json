@@ -1,0 +1,126 @@
+{
+  "health": {
+    "status": "healthy",
+    "version": "1.0.0",
+    "models": {
+      "yolov8": {
+        "model_name": "YOLOv8 (yolov8n.pt)",
+        "is_loaded": false,
+        "type": "YOLODetector"
+      },
+      "detectron2": {
+        "model_name": "Detectron2 (COCO-InstanceSegmentation/mask_rcnn_R_50_FPN_3x.yaml)",
+        "is_loaded": false,
+        "type": "Detectron2Detector"
+      },
+      "grounding_dino": {
+        "model_name": "Grounding DINO (IDEA-Research/grounding-dino-tiny)",
+        "is_loaded": false,
+        "type": "GroundingDINODetector"
+      },
+      "sam": {
+        "model_name": "SAM (vit_b)",
+        "is_loaded": false,
+        "type": "SAMSegmenter"
+      }
+    }
+  },
+  "yolo": [
+    {
+      "image": "bus.jpg",
+      "success": true,
+      "time": 5.688849925994873,
+      "detections": 6
+    },
+    {
+      "image": "car.jpg",
+      "success": true,
+      "time": 2.185145616531372,
+      "detections": 1
+    },
+    {
+      "image": "dog.jpg",
+      "success": true,
+      "time": 2.2069928646087646,
+      "detections": 1
+    },
+    {
+      "image": "people.jpg",
+      "success": true,
+      "time": 2.1531858444213867,
+      "detections": 3
+    },
+    {
+      "image": "zidane.jpg",
+      "success": true,
+      "time": 2.1819825172424316,
+      "detections": 3
+    }
+  ],
+  "grounding_dino": [
+    {
+      "image": "bus.jpg",
+      "prompt": "bus. person. car.",
+      "success": false,
+      "error": "Internal Server Error"
+    },
+    {
+      "image": "zidane.jpg",
+      "prompt": "person. face. shirt.",
+      "success": false,
+      "error": "Internal Server Error"
+    },
+    {
+      "image": "people.jpg",
+      "prompt": "person. crowd. people.",
+      "success": false,
+      "error": "Internal Server Error"
+    },
+    {
+      "image": "car.jpg",
+      "prompt": "car. vehicle. automobile.",
+      "success": false,
+      "error": "Internal Server Error"
+    },
+    {
+      "image": "dog.jpg",
+      "prompt": "dog. animal. pet.",
+      "success": false,
+      "error": "Internal Server Error"
+    }
+  ],
+  "sam": [
+    {
+      "image": "bus.jpg",
+      "success": true,
+      "time": 200.9413936138153,
+      "masks": 0
+    },
+    {
+      "image": "car.jpg",
+      "success": true,
+      "time": 136.68102049827576,
+      "masks": 0
+    },
+    {
+      "image": "dog.jpg",
+      "success": true,
+      "time": 129.00478315353394,
+      "masks": 0
+    }
+  ],
+  "pipeline": [
+    {
+      "image": "bus.jpg",
+      "prompt": "bus",
+      "success": false,
+      "error": "Internal Server Error"
+    },
+    {
+      "image": "dog.jpg",
+      "prompt": "dog",
+      "success": false,
+      "error": "Internal Server Error"
+    }
+  ]
+}

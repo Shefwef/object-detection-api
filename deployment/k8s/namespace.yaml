@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cv-detection
+  labels:
+    app: cv-detection-platform
+    purpose: academic-research

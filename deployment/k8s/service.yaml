@@ -1,0 +1,23 @@
+# ════════════════════════════════════════════════════════════
+#  Kubernetes Service — Exposes the API within the cluster
+# ════════════════════════════════════════════════════════════
+#
+#  Type: ClusterIP (internal only, exposed via Ingress)
+#  Change to LoadBalancer for direct external access without Ingress.
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: cv-detection-service
+  namespace: cv-detection
+  labels:
+    app: cv-detection-api
+spec:
+  type: ClusterIP
+  selector:
+    app: cv-detection-api
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8000
+      protocol: TCP

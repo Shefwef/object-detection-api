@@ -1,0 +1,118 @@
+{
+  "health": {
+    "status": "healthy",
+    "version": "1.0.0",
+    "models": {
+      "yolov8": {
+        "model_name": "YOLOv8 (yolov8n.pt)",
+        "is_loaded": false,
+        "type": "YOLODetector"
+      },
+      "detectron2": {
+        "model_name": "Detectron2 (COCO-InstanceSegmentation/mask_rcnn_R_50_FPN_3x.yaml)",
+        "is_loaded": false,
+        "type": "Detectron2Detector"
+      },
+      "grounding_dino": {
+        "model_name": "Grounding DINO (IDEA-Research/grounding-dino-tiny)",
+        "is_loaded": false,
+        "type": "GroundingDINODetector"
+      },
+      "sam": {
+        "model_name": "SAM (vit_b)",
+        "is_loaded": false,
+        "type": "SAMSegmenter"
+      }
+    }
+  },
+  "yolo": [
+    {
+      "image": "bus.jpg",
+      "success": false,
+      "error": "{\"detail\":[{\"type\":\"missing\",\"loc\":[\"body\",\"file\"],\"msg\":\"Field required\",\"input\":null}]}"
+    },
+    {
+      "image": "car.jpg",
+      "success": false,
+      "error": "{\"detail\":[{\"type\":\"missing\",\"loc\":[\"body\",\"file\"],\"msg\":\"Field required\",\"input\":null}]}"
+    },
+    {
+      "image": "dog.jpg",
+      "success": false,
+      "error": "{\"detail\":[{\"type\":\"missing\",\"loc\":[\"body\",\"file\"],\"msg\":\"Field required\",\"input\":null}]}"
+    },
+    {
+      "image": "people.jpg",
+      "success": false,
+      "error": "{\"detail\":[{\"type\":\"missing\",\"loc\":[\"body\",\"file\"],\"msg\":\"Field required\",\"input\":null}]}"
+    },
+    {
+      "image": "zidane.jpg",
+      "success": false,
+      "error": "{\"detail\":[{\"type\":\"missing\",\"loc\":[\"body\",\"file\"],\"msg\":\"Field required\",\"input\":null}]}"
+    }
+  ],
+  "grounding_dino": [
+    {
+      "image": "bus.jpg",
+      "prompt": "bus. person. car.",
+      "success": false,
+      "error": "{\"detail\":[{\"type\":\"missing\",\"loc\":[\"body\",\"file\"],\"msg\":\"Field required\",\"input\":null}]}"
+    },
+    {
+      "image": "zidane.jpg",
+      "prompt": "person. face. shirt.",
+      "success": false,
+      "error": "{\"detail\":[{\"type\":\"missing\",\"loc\":[\"body\",\"file\"],\"msg\":\"Field required\",\"input\":null}]}"
+    },
+    {
+      "image": "people.jpg",
+      "prompt": "person. crowd. people.",
+      "success": false,
+      "error": "{\"detail\":[{\"type\":\"missing\",\"loc\":[\"body\",\"file\"],\"msg\":\"Field required\",\"input\":null}]}"
+    },
+    {
+      "image": "car.jpg",
+      "prompt": "car. vehicle. automobile.",
+      "success": false,
+      "error": "{\"detail\":[{\"type\":\"missing\",\"loc\":[\"body\",\"file\"],\"msg\":\"Field required\",\"input\":null}]}"
+    },
+    {
+      "image": "dog.jpg",
+      "prompt": "dog. animal. pet.",
+      "success": false,
+      "error": "{\"detail\":[{\"type\":\"missing\",\"loc\":[\"body\",\"file\"],\"msg\":\"Field required\",\"input\":null}]}"
+    }
+  ],
+  "sam": [
+    {
+      "image": "bus.jpg",
+      "success": false,
+      "error": "{\"detail\":[{\"type\":\"missing\",\"loc\":[\"body\",\"file\"],\"msg\":\"Field required\",\"input\":null}]}"
+    },
+    {
+      "image": "car.jpg",
+      "success": false,
+      "error": "{\"detail\":[{\"type\":\"missing\",\"loc\":[\"body\",\"file\"],\"msg\":\"Field required\",\"input\":null}]}"
+    },
+    {
+      "image": "dog.jpg",
+      "success": false,
+      "error": "{\"detail\":[{\"type\":\"missing\",\"loc\":[\"body\",\"file\"],\"msg\":\"Field required\",\"input\":null}]}"
+    }
+  ],
+  "pipeline": [
+    {
+      "image": "bus.jpg",
+      "prompt": "bus",
+      "success": false,
+      "error": "{\"detail\":\"Not Found\"}"
+    },
+    {
+      "image": "dog.jpg",
+      "prompt": "dog",
+      "success": false,
+      "error": "{\"detail\":\"Not Found\"}"
+    }
+  ]
+}

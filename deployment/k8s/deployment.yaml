@@ -1,0 +1,100 @@
+# ════════════════════════════════════════════════════════════
+#  Kubernetes Deployment — CV Detection Platform
+# ════════════════════════════════════════════════════════════
+#
+#  Defines the Pod spec and replica strategy for the API.
+#  Uses resource requests/limits to ensure stable scheduling.
+#
+#  Apply:
+#    kubectl apply -f namespace.yaml
+#    kubectl apply -f deployment.yaml
+# ════════════════════════════════════════════════════════════
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cv-detection-api
+  namespace: cv-detection
+  labels:
+    app: cv-detection-api
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: cv-detection-api
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1          # Create 1 new pod before killing old
+      maxUnavailable: 0    # Zero downtime during rollout
+  template:
+    metadata:
+      labels:
+        app: cv-detection-api
+    spec:
+      containers:
+        - name: cv-detection
+          # Replace with your ECR/Docker Hub image
+          image: cv-detection-platform:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8000
+              protocol: TCP
+          env:
+            - name: DEVICE
+              value: "cpu"
+            - name: LOG_LEVEL
+              value: "INFO"
+            - name: YOLO_MODEL_NAME
+              value: "yolov8n.pt"
+            - name: SAM_MODEL_TYPE
+              value: "vit_b"
+          resources:
+            requests:
+              cpu: "1000m"        # 1 vCPU minimum
+              memory: "4Gi"       # 4GB minimum (models are large)
+            limits:
+              cpu: "2000m"        # 2 vCPU max
+              memory: "8Gi"       # 8GB max
+              # Uncomment for GPU nodes:
+              # nvidia.com/gpu: 1
+
+          # ─── Health Probes ────────────────────────────
+          # Readiness: K8s won't send traffic until this passes
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          # Liveness: K8s restarts container if this fails
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+
+          # Startup: Allows extra time for first model download
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 30   # Up to 5 minutes for model downloads
+
+          # ─── Volume for model cache ───────────────────
+          volumeMounts:
+            - name: model-cache
+              mountPath: /home/appuser/.cache
+
+      volumes:
+        - name: model-cache
+          emptyDir:
+            sizeLimit: 10Gi    # Space for downloaded model weights

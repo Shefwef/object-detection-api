@@ -1,0 +1,48 @@
+# ════════════════════════════════════════════════════════════
+#  Horizontal Pod Autoscaler — Auto-scales based on CPU/memory
+# ════════════════════════════════════════════════════════════
+#
+#  Scales from 2 → 6 replicas when average CPU > 70%.
+#  Requires metrics-server in the cluster.
+#
+#  Check status:
+#    kubectl get hpa -n cv-detection
+
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: cv-detection-hpa
+  namespace: cv-detection
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: cv-detection-api
+  minReplicas: 2
+  maxReplicas: 6
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 60   # Wait 1 min before scaling up
+      policies:
+        - type: Pods
+          value: 2
+          periodSeconds: 60
+    scaleDown:
+      stabilizationWindowSeconds: 300  # Wait 5 min before scaling down
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 120

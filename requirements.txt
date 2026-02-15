@@ -1,0 +1,50 @@
+# ──────────────────────────────────────────────
+# Core Framework
+# ──────────────────────────────────────────────
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+python-multipart==0.0.19
+pydantic==2.10.4
+pydantic-settings==2.7.1
+
+# ──────────────────────────────────────────────
+# Computer Vision & Deep Learning
+# ──────────────────────────────────────────────
+torch>=2.1.0
+torchvision>=0.16.0
+opencv-python-headless==4.10.0.84
+numpy==1.24.3
+Pillow>=10.0.0
+
+# ──────────────────────────────────────────────
+# Object Detection Models
+# ──────────────────────────────────────────────
+
+# YOLOv8 — Ultralytics (single-stage real-time detector)
+ultralytics>=8.3.0
+
+# Detectron2 — Meta AI (two-stage Mask R-CNN)
+# Install from source for latest compatibility:
+#   pip install 'git+https://github.com/facebookresearch/detectron2.git'
+# Or use pre-built wheel (Linux, CUDA 11.8, Python 3.10):
+#   pip install detectron2 -f https://dl.fbaipublicfiles.com/detectron2/wheels/cu118/torch2.1/index.html
+
+# Grounding DINO — open-set detection via HuggingFace transformers
+transformers>=4.42.0
+
+# SAM — Segment Anything Model (Meta AI)
+segment-anything @ git+https://github.com/facebookresearch/segment-anything.git
+
+# ──────────────────────────────────────────────
+# Utilities
+# ──────────────────────────────────────────────
+python-dotenv==1.0.1
+requests>=2.31.0
+aiofiles==24.1.0
+
+# ──────────────────────────────────────────────
+# Testing
+# ──────────────────────────────────────────────
+pytest==8.3.4
+pytest-asyncio==0.24.0
+httpx==0.28.1

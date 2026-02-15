@@ -1,0 +1,64 @@
+# ════════════════════════════════════════════════════════════
+#  Docker Compose — Local Development & Testing
+# ════════════════════════════════════════════════════════════
+#
+#  Usage:
+#    docker-compose up --build          # Build & start
+#    docker-compose up -d               # Detached mode
+#    docker-compose logs -f cv-api      # View logs
+#    docker-compose down                # Stop & remove
+#
+#  For GPU support, install NVIDIA Container Toolkit first:
+#    https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/
+# ════════════════════════════════════════════════════════════
+
+services:
+  cv-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: cv-detection-platform
+    ports:
+      - "8000:8000"
+    environment:
+      - DEVICE=auto
+      - LOG_LEVEL=INFO
+      - YOLO_MODEL_NAME=yolov8n.pt
+      - SAM_MODEL_TYPE=vit_b
+    volumes:
+      # Persist downloaded model weights across container restarts
+      - model-cache:/home/appuser/.cache
+    restart: unless-stopped
+    # ─── Uncomment below for GPU support ───
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+  # ─── Optional: CPU-only variant ───
+  cv-api-cpu:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        BASE_IMAGE: python:3.10-slim
+    container_name: cv-detection-platform-cpu
+    ports:
+      - "8001:8000"
+    environment:
+      - DEVICE=cpu
+      - LOG_LEVEL=INFO
+      - YOLO_MODEL_NAME=yolov8n.pt
+      - SAM_MODEL_TYPE=vit_b
+    volumes:
+      - model-cache-cpu:/home/appuser/.cache
+    restart: unless-stopped
+    profiles:
+      - cpu  # Only starts with: docker-compose --profile cpu up
+
+volumes:
+  model-cache:
+  model-cache-cpu:

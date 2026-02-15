@@ -1,0 +1,53 @@
+# ──────── Python ────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+eggs/
+*.egg
+
+# ──────── Virtual Environments ────────
+venv/
+.venv/
+env/
+
+# ──────── IDE / Editor ────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ──────── Environment ────────
+.env
+
+# ──────── Model Weights / Caches ────────
+*.pt
+*.pth
+*.onnx
+*.bin
+*.safetensors
+model_weights/
+checkpoints/
+
+# ──────── Data & Outputs ────────
+sample_images/*.jpg
+sample_images/*.png
+outputs/
+results/
+
+# ──────── Docker ────────
+docker-compose.override.yml
+
+# ──────── OS ────────
+.DS_Store
+Thumbs.db
+
+# ──────── Logs ────────
+*.log
+
+# ──────── Jupyter ────────
+.ipynb_checkpoints/
