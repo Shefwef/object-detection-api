@@ -1,164 +1,72 @@
 """
-Combined Pipeline API endpoint: Grounding DINO + SAM.
+Combined pipeline endpoint: Grounding DINO -> SAM.
 
-This is the most impressive and practical pipeline — it combines
-open-set text-based detection (Grounding DINO) with universal
-segmentation (SAM) to achieve:
-
-    "Describe anything → Detect it → Segment it precisely"
-
-This pipeline is likely what IML's product uses: a flexible system
-where users/clients can specify what to detect via text, and get
-pixel-perfect segmentation masks without any model retraining.
+Delegates all orchestration to :class:`PipelineService`; the router is a
+thin FastAPI adapter that only translates between HTTP and the service.
 """
 
-from fastapi import APIRouter, File, UploadFile, Form, HTTPException
-from fastapi.responses import StreamingResponse
-from typing import Optional
-from io import BytesIO
-import numpy as np
-import logging
+from __future__ import annotations
 
-from app.models.grounding_dino import GroundingDINODetector
-from app.models.sam_model import SAMSegmenter
-from app.utils.image_utils import load_image_from_upload, image_to_bytes
+import logging
+from io import BytesIO
+
+from fastapi import APIRouter, Depends, File, Form, UploadFile
+from fastapi.responses import StreamingResponse
+
+from app.dependencies import get_pipeline_service
+from app.services.pipeline_service import PipelineService
+from app.utils.image_utils import image_to_bytes, load_image_from_upload
 from app.utils.visualization import draw_detections, draw_masks
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/pipeline", tags=["Combined Pipeline"])
 
-# Shared model instances
-_gdino: Optional[GroundingDINODetector] = None
-_sam: Optional[SAMSegmenter] = None
 
-
-def get_gdino() -> GroundingDINODetector:
-    global _gdino
-    if _gdino is None:
-        _gdino = GroundingDINODetector()
-    return _gdino
-
-
-def get_sam() -> SAMSegmenter:
-    global _sam
-    if _sam is None:
-        _sam = SAMSegmenter()
-    return _sam
-
-
-@router.post("/detect-and-segment", summary="Detect with text → Segment with SAM")
+@router.post("/detect-and-segment", summary="Text prompt -> Detect -> Segment")
 async def detect_and_segment(
     file: UploadFile = File(..., description="Image file"),
-    text_prompt: str = Form(..., description="Describe objects to find (e.g., 'cat . dog')"),
+    text_prompt: str = Form(..., description="Describe objects to find"),
     box_threshold: float = Form(0.35, description="Detection confidence threshold"),
+    service: PipelineService = Depends(get_pipeline_service),
 ):
-    """
-    **Grounding DINO + SAM Pipeline**
-    
-    1. Grounding DINO detects objects matching your text description
-    2. Detection boxes are passed to SAM as prompts
-    3. SAM generates precise segmentation masks for each detection
-    
-    This enables open-vocabulary instance segmentation:
-    describe ANY object in natural language and get pixel-perfect masks.
-    
-    Example prompts:
-    - "person . car" → detect and segment people and cars
-    - "damaged area on the wall" → segment damage
-    - "product on shelf" → segment products
+    """Open-vocabulary instance segmentation.
+
+    Grounding DINO turns natural language into bounding boxes; SAM turns
+    those boxes into pixel-perfect masks.  Together they let a caller
+    describe any object and get segmentation without retraining.
     """
     image = await load_image_from_upload(file)
-
-    gdino = get_gdino()
-    sam = get_sam()
-
-    # Step 1: Detect with Grounding DINO
-    logger.info(f"Pipeline Step 1: Detecting '{text_prompt}' with Grounding DINO")
-    boxes, labels, scores = gdino.get_boxes_for_sam(
-        image, text_prompt, box_threshold=box_threshold
+    payload = await service.detect_and_segment(
+        image, text_prompt=text_prompt, box_threshold=box_threshold
     )
-
-    if len(boxes) == 0:
-        return {
-            "detection_model": "grounding_dino",
-            "segmentation_model": "sam",
-            "text_prompt": text_prompt,
-            "detections": [],
-            "segments": [],
-            "detection_count": 0,
-            "segment_count": 0,
-            "image_shape": list(image.shape[:2]),
-            "message": "No objects matching the text prompt were detected.",
-        }
-
-    # Step 2: Segment with SAM
-    logger.info(f"Pipeline Step 2: Segmenting {len(boxes)} detections with SAM")
-    sam_results = sam.predict(image, mode="boxes", boxes=boxes)
-
-    # Combine results
-    detections = []
-    for i in range(len(boxes)):
-        det = {
-            "id": i,
-            "bbox": boxes[i].tolist(),
-            "confidence": scores[i],
-            "label": labels[i],
-        }
-        detections.append(det)
-
-    return {
-        "detection_model": "grounding_dino",
-        "segmentation_model": "sam",
-        "text_prompt": text_prompt,
-        "detections": detections,
-        "segments": sam_results["segments"],
-        "detection_count": len(detections),
-        "segment_count": len(sam_results["segments"]),
-        "image_shape": list(image.shape[:2]),
-    }
+    return payload
 
 
 @router.post(
     "/detect-and-segment-visualize",
-    summary="Detect + Segment + Return annotated image",
+    summary="Full pipeline + annotated image response",
 )
 async def detect_segment_visualize(
     file: UploadFile = File(...),
     text_prompt: str = Form(..., description="Describe objects to find"),
     box_threshold: float = Form(0.35),
+    service: PipelineService = Depends(get_pipeline_service),
 ):
-    """
-    Full pipeline with visualization: detect → segment → draw results.
-    Returns an annotated JPEG image with boxes and mask overlays.
-    """
+    """Run the pipeline and return an annotated JPEG with masks + boxes."""
     image = await load_image_from_upload(file)
-
-    gdino = get_gdino()
-    sam = get_sam()
-
-    # Step 1: Detect
-    boxes, labels, scores = gdino.get_boxes_for_sam(
-        image, text_prompt, box_threshold=box_threshold
+    payload = await service.detect_and_segment(
+        image,
+        text_prompt=text_prompt,
+        box_threshold=box_threshold,
+        return_masks=True,
     )
 
-    if len(boxes) == 0:
+    if not payload.get("detections"):
         img_bytes = image_to_bytes(image, format="JPEG")
         return StreamingResponse(BytesIO(img_bytes), media_type="image/jpeg")
 
-    # Step 2: Get raw masks from SAM
-    masks = sam.get_masks_raw(image, boxes)
-
-    # Step 3: Visualize
-    # Draw masks first (as overlay)
-    annotated = draw_masks(image, masks, alpha=0.4)
-
-    # Draw detection boxes and labels on top
-    detections = [
-        {"id": i, "bbox": boxes[i].tolist(), "label": labels[i], "confidence": scores[i]}
-        for i in range(len(boxes))
-    ]
-    annotated = draw_detections(annotated, detections)
-
+    annotated = draw_masks(image, payload["raw_masks"], alpha=0.4)
+    annotated = draw_detections(annotated, payload["detections"])
     img_bytes = image_to_bytes(annotated, format="JPEG")
     return StreamingResponse(BytesIO(img_bytes), media_type="image/jpeg")
