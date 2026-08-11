@@ -15,12 +15,13 @@
 3. [Request flows](#request-flows)
 4. [Project layout](#project-layout)
 5. [Getting started](#getting-started)
-6. [API reference](#api-reference)
-7. [Configuration](#configuration)
-8. [Deployment](#deployment)
-9. [Testing](#testing)
-10. [Roadmap](#roadmap)
-11. [References](#references)
+6. [Frontend](#frontend)
+7. [API reference](#api-reference)
+8. [Configuration](#configuration)
+9. [Deployment](#deployment)
+10. [Testing](#testing)
+11. [Roadmap](#roadmap)
+12. [References](#references)
 
 ---
 
@@ -329,6 +330,25 @@ curl -X POST "http://localhost:8000/api/v1/yolo/detect" \
 
 ---
 
+## Frontend
+
+A Next.js 15 + TypeScript + Tailwind UI lives in [`frontend/`](frontend/) with three pages:
+
+- **`/`** — drag-and-drop upload, pick any subset of models, annotated canvas + detections table.
+- **`/compare`** — run all four models on the same image in parallel with a latency chart.
+- **`/metrics`** — live per-model dashboard (auto-refreshes every 5 s).
+
+```bash
+cd frontend
+npm install
+cp .env.example .env.local     # dev proxy is preconfigured
+npm run dev
+```
+
+See [`frontend/README.md`](frontend/README.md) for full details and [`DEPLOY.md`](DEPLOY.md) for the HF Spaces + Vercel walkthrough.
+
+---
+
 ## API reference
 
 ### Detection endpoints
@@ -406,6 +426,21 @@ Every setting lives in `app/config.py` and is overridable via environment variab
 ---
 
 ## Deployment
+
+**Fastest path (free-tier live demo):** Hugging Face Spaces (backend) + Vercel (frontend). Both auto-deploy from GitHub. Follow the step-by-step [`DEPLOY.md`](DEPLOY.md).
+
+### Hugging Face Spaces (backend)
+
+- GitHub Actions workflow `.github/workflows/deploy-hf.yml` pushes to your Space on every merge to `main`.
+- Required secrets: `HF_TOKEN`, `HF_USERNAME`, `HF_SPACE_NAME`.
+- Space README lives at [`deployment/hf/README.md`](deployment/hf/README.md); the workflow copies it into the Space on each push.
+- The container Dockerfile honours `$PORT`, so the same image works on HF (7860), local (8000), and cloud runners.
+
+### Vercel (frontend)
+
+- Import the repo in Vercel with **Root Directory** = `frontend`.
+- Set `NEXT_PUBLIC_API_BASE_URL` to your HF Space URL.
+- Auto-deploys on every push.
 
 ### AWS ECS Fargate (CloudFormation)
 
