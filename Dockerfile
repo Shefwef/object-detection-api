@@ -1,18 +1,25 @@
 # ════════════════════════════════════════════════════════════
-#  Multi-Model CV Detection Platform — CPU-Only Dockerfile
+#  Multi-Model CV Detection Platform — CPU Dockerfile
 # ════════════════════════════════════════════════════════════
-#  Simple single-stage build optimized for CPU inference
-#  Build: docker build -t cv-detection-api .
-#  Run:   docker run -p 8000:8000 cv-detection-api
+#  Works locally, on AWS ECS Fargate, on Kubernetes, and on
+#  Hugging Face Spaces. The container listens on ${PORT:-8000}
+#  so HF Spaces (which mandates 7860) is a one-liner override.
+#
+#  Local:   docker build -t cv-detection-api .
+#           docker run -p 8000:8000 cv-detection-api
+#  HF:      the platform sets PORT=7860 automatically.
 # ════════════════════════════════════════════════════════════
 
 FROM python:3.11-slim
 
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
-ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    DEBIAN_FRONTEND=noninteractive \
+    PORT=8000 \
+    HF_HOME=/home/appuser/.cache/huggingface \
+    XDG_CACHE_HOME=/home/appuser/.cache
 
-# Install system dependencies for OpenCV and ML libraries
+# System dependencies for OpenCV + ML libs
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     libgl1 \
@@ -24,20 +31,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Upgrade pip
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel
 
-# Install PyTorch CPU-only FIRST (large but cached separately)
+# ── PyTorch CPU wheels (cached separately in its own layer)
 RUN pip install --no-cache-dir \
     torch==2.1.0 \
     torchvision==0.16.0 \
     --index-url https://download.pytorch.org/whl/cpu
 
-# Install Python dependencies
+# ── Python deps
 WORKDIR /build
 COPY requirements.txt .
-
-# Install remaining packages (skip torch/torchvision already installed)
 RUN pip install --no-cache-dir \
     fastapi==0.115.6 \
     uvicorn[standard]==0.34.0 \
@@ -49,26 +53,28 @@ RUN pip install --no-cache-dir \
     Pillow>=10.0.0 \
     ultralytics>=8.3.0 \
     transformers>=4.42.0 \
+    structlog>=24.4.0 \
     git+https://github.com/facebookresearch/segment-anything.git
 
-# Create application directory
+# ── Application
 WORKDIR /app
-
-# Copy application code and model weights
 COPY app/ ./app/
-COPY yolov8n.pt ./yolov8n.pt
 
-# Create non-root user for security
-RUN useradd --create-home --shell /bin/bash appuser && \
-    chown -R appuser:appuser /app
+# ── Non-root user (also HF Spaces requirement: uid 1000)
+RUN useradd --create-home --uid 1000 --shell /bin/bash appuser && \
+    mkdir -p /home/appuser/.cache/huggingface && \
+    chown -R appuser:appuser /app /home/appuser
 USER appuser
 
-# Health check
+# YOLOv8n weights auto-download on first inference call to
+# /home/appuser/.cache/... — no need to bake them into the image.
+
 HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
-    CMD curl -f http://localhost:8000/health || exit 1
+    CMD curl -f http://localhost:${PORT}/health || exit 1
 
-# Expose API port
 EXPOSE 8000
+EXPOSE 7860
 
-# Run FastAPI with uvicorn
-CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Honor $PORT so HF Spaces (7860) and everything else (8000) work
+# from the same image.
+CMD ["sh", "-c", "python -m uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
