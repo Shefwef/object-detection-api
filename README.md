@@ -1,160 +1,371 @@
-# Comparative Analysis of Modern Object Detection & Segmentation Models: A Unified Inference Platform
+# Unified Object Detection & Segmentation API
 
-> **Academic Research & Development Project**
-> Exploring real-time object detection and segmentation architectures through a production-grade unified inference system.
+> A production-grade FastAPI service that unifies four state-of-the-art computer-vision models — **YOLOv8**, **Detectron2 (Mask R-CNN)**, **Grounding DINO**, and **SAM** — behind a single versioned REST interface, with a layered clean-architecture backend, pluggable caching / metrics backends, API-key auth, and Grad-CAM explainability.
 
----
-
-## Abstract
-
-This project presents a **comparative study and unified deployment framework** for four state-of-the-art computer vision models: **YOLOv8** (single-stage detection), **Detectron2** (two-stage instance segmentation), **Grounding DINO** (open-set language-grounded detection), and **SAM** (foundation model for universal segmentation). The system exposes all models through a standardized REST API, enabling direct comparison of inference characteristics, accuracy trade-offs, and deployment considerations across architectures.
-
-A key contribution is the implementation of a **Grounding DINO + SAM pipeline** that achieves open-vocabulary instance segmentation — detecting and segmenting arbitrary objects from natural language descriptions without model retraining.
-
-The platform is containerized with Docker and includes Infrastructure-as-Code templates for cloud deployment on AWS (ECS Fargate) and Kubernetes, demonstrating MLOps best practices for serving computer vision models in production.
+<p align="center">
+  <em>Detect anything. Segment anything. Explain anything. All from one endpoint.</em>
+</p>
 
 ---
 
-## Research Objectives
+## Table of contents
 
-1. **Architectural Comparison**: Understand the design differences between single-stage (YOLO), two-stage (Detectron2), language-grounded (Grounding DINO), and foundation (SAM) model architectures.
-2. **Pipeline Composition**: Investigate how combining detection models with segmentation foundation models (Grounding DINO → SAM) enables zero-shot instance segmentation.
-3. **Production Deployment**: Study the engineering requirements for serving large CV models via containerized microservices with proper health monitoring, autoscaling, and GPU/CPU flexibility.
+1. [Highlights](#highlights)
+2. [System architecture](#system-architecture)
+3. [Request flows](#request-flows)
+4. [Project layout](#project-layout)
+5. [Getting started](#getting-started)
+6. [API reference](#api-reference)
+7. [Configuration](#configuration)
+8. [Deployment](#deployment)
+9. [Testing](#testing)
+10. [Roadmap](#roadmap)
+11. [References](#references)
 
---- 
+---
 
-## System Architecture
+## Highlights
+
+| Capability | Endpoint | Notes |
+|---|---|---|
+| Real-time object detection | `POST /api/v1/yolo/detect` | YOLOv8, 80 COCO classes, single-stage |
+| Low-latency webcam frames | `POST /api/v1/yolo/detect-base64` | Skips multipart round-trip |
+| Instance segmentation | `POST /api/v1/detectron2/detect` | Two-stage Mask R-CNN |
+| Open-set text detection | `POST /api/v1/grounding-dino/detect` | Any object, described in words |
+| Universal segmentation | `POST /api/v1/sam/segment-*` | Auto / points / boxes prompts |
+| Text → detect → segment | `POST /api/v1/pipeline/detect-and-segment` | Grounding DINO + SAM pipeline |
+| Grad-CAM explainability | `POST /api/v1/explain/gradcam` | Heatmap for a chosen detection |
+| Live benchmark dashboard | `GET /api/v1/metrics/summary` | Per-model latency, throughput, cache hits |
+| System health | `GET /health` | Per-model load status |
+
+**Non-functional highlights**
+
+- **Clean architecture** — routers → services → repositories → models. Every layer talks only to the layer directly below it.
+- **Strategy + Factory** — every model implements `BaseDetectionModel`; new models plug in via `ModelFactory.register()` without touching callers.
+- **Pluggable backends** — inference cache defaults to in-memory LRU; swaps to Redis by setting `REDIS_URL`. Metrics default to in-memory ring buffer; persist to MongoDB by setting `MONGO_URL`. Zero code changes.
+- **Structured logging** — set `LOG_JSON=true` to emit JSON logs consumable by Datadog / CloudWatch / Loki without regex.
+- **Opt-in auth** — API-key middleware + rate limiter guarded behind `AUTH_ENABLED`. Health and docs stay public.
+- **Graceful degradation** — Grad-CAM falls back to a Sobel + Gaussian saliency map when `pytorch-grad-cam` is not installed. Redis / Mongo failures degrade to in-memory backends. Optional dependencies are truly optional.
+- **CUDA-ready containerization** — multi-stage Dockerfile, ECS Fargate CloudFormation, and Kubernetes manifests with HPA.
+
+---
+
+## System architecture
+
+### Layered view
+
+```mermaid
+graph TB
+    subgraph Client["Clients"]
+        Browser["Browser / Frontend"]
+        CLI["curl / SDK"]
+    end
+
+    subgraph API["API Layer — FastAPI"]
+        MW["CORS + API-Key + Rate-Limit Middleware"]
+        YOLOr["yolo_router"]
+        D2r["detectron2_router"]
+        GDINOr["grounding_dino_router"]
+        SAMr["sam_router"]
+        Pipeliner["pipeline_router"]
+        ExplainR["explain_router"]
+        MetricsR["metrics_router"]
+    end
+
+    subgraph Svc["Service Layer — Orchestration"]
+        Det["DetectionService"]
+        Pipe["PipelineService"]
+        Exp["ExplainabilityService"]
+        Met["MetricsService"]
+    end
+
+    subgraph Repo["Repository Layer — Persistence"]
+        InfRepo["IInferenceRepository<br/>(InMemory | Redis)"]
+        MetRepo["IMetricsRepository<br/>(InMemory | Mongo)"]
+    end
+
+    subgraph Model["Model Layer — Strategy + Factory"]
+        Factory["ModelFactory<br/>(Registry + Singletons)"]
+        Base["BaseDetectionModel (ABC)"]
+        YOLOm["YOLOv8 · single-stage · ~100 FPS GPU"]
+        D2m["Detectron2 · two-stage · Mask R-CNN"]
+        GDINOm["Grounding DINO · open-set · text-driven"]
+        SAMm["SAM · foundation · universal seg"]
+    end
+
+    subgraph Store["Optional External Stores"]
+        Redis[("Redis")]
+        Mongo[("MongoDB")]
+    end
+
+    Browser --> MW
+    CLI --> MW
+    MW --> YOLOr & D2r & GDINOr & SAMr & Pipeliner & ExplainR & MetricsR
+
+    YOLOr & D2r & GDINOr & SAMr --> Det
+    Pipeliner --> Pipe
+    ExplainR --> Exp
+    MetricsR --> Met
+
+    Det & Pipe --> Factory
+    Factory --> Base
+    Base --> YOLOm & D2m & GDINOm & SAMm
+
+    Det --> InfRepo
+    Det --> MetRepo
+    Pipe --> MetRepo
+    Met --> MetRepo
+
+    InfRepo -.optional.-> Redis
+    MetRepo -.optional.-> Mongo
+```
+
+Each layer only depends on the one below it. Swap the repository backend (Redis → Mongo → in-memory) and neither the routers nor the models notice.
+
+### Deployment view
+
+```mermaid
+graph LR
+    Dev["Developer"] -->|git push| GH["GitHub"]
+
+    GH -->|CI: pytest + ruff + mypy| CI["Actions"]
+    CI -->|docker build| GHCR["ghcr.io"]
+
+    subgraph Prod["Production Targets"]
+        HF["Hugging Face Spaces<br/>(free T4 GPU)"]
+        ECS["AWS ECS Fargate<br/>(CloudFormation IaC)"]
+        K8s["Kubernetes<br/>(HPA + rolling)"]
+    end
+
+    GHCR --> HF
+    GHCR --> ECS
+    GHCR --> K8s
+
+    subgraph Backends["Optional Backends"]
+        Redis[("Redis / Upstash")]
+        Mongo[("MongoDB Atlas")]
+    end
+
+    HF & ECS & K8s -.-> Redis
+    HF & ECS & K8s -.-> Mongo
+```
+
+---
+
+## Request flows
+
+### Standard detection (YOLOv8)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as Client
+    participant M as AuthMiddleware
+    participant R as yolo_router
+    participant S as DetectionService
+    participant Cache as IInferenceRepository
+    participant Model as YOLOv8Model
+    participant Metrics as IMetricsRepository
+
+    C->>M: POST /api/v1/yolo/detect (multipart JPEG)
+    M->>M: Verify X-API-Key + rate limit
+    M->>R: forward
+    R->>R: Read + decode image bytes
+    R->>S: detect(image, YOLO, image_bytes)
+    S->>Cache: get(hash, "yolov8")
+    alt cache hit
+        Cache-->>S: cached payload
+    else cache miss
+        S->>Model: infer(image, **kwargs)
+        Model-->>S: InferenceResult
+        S->>Cache: set(hash, "yolov8", payload)
+    end
+    S->>Metrics: record(model, latency, count, cached)
+    S-->>R: InferenceResult
+    R-->>C: JSON { detections, inference_time_ms, cached, ... }
+```
+
+### Open-vocabulary pipeline (Grounding DINO → SAM)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as Client
+    participant P as pipeline_router
+    participant S as PipelineService
+    participant G as GroundingDINO
+    participant A as SAM
+    participant Metrics as IMetricsRepository
+
+    C->>P: POST /api/v1/pipeline/detect-and-segment<br/>{ file, text_prompt: "person wearing helmet" }
+    P->>S: detect_and_segment(image, prompt)
+    S->>G: get_boxes_for_sam(image, prompt)
+    G-->>S: boxes, labels, scores
+    S->>A: predict(image, mode="boxes", boxes=boxes)
+    A-->>S: per-box masks
+    S->>Metrics: record("grounding_dino+sam", latency, count, false)
+    S-->>P: { detections, segments, inference_time_ms, ... }
+    P-->>C: JSON response (or annotated JPEG)
+```
+
+### Grad-CAM explainability
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as Client
+    participant R as explain_router
+    participant E as ExplainabilityService
+    participant Y as YOLOv8Model
+
+    C->>R: POST /api/v1/explain/gradcam { file, detection_index? }
+    R->>E: explain(image, detection_index, confidence)
+    E->>Y: predict(image, confidence)
+    Y-->>E: detections
+    alt pytorch-grad-cam installed
+        E->>Y: forward + backward on target layer
+        Y-->>E: gradients
+        E->>E: Grad-CAM heatmap
+    else fallback
+        E->>E: Sobel edges + Gaussian focus (dependency-free)
+    end
+    E-->>R: { method, heatmap_base64, caption, detections }
+    R-->>C: JSON
+```
+
+---
+
+## Project layout
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    FastAPI Gateway                        │
-│                  (REST API + Swagger)                     │
-├──────────┬──────────┬───────────────┬───────────────────┤
-│  YOLOv8  │Detectron2│ Grounding DINO│   SAM (Segment    │
-│ (Real-   │ (Instance│ (Open-Set     │   Anything Model) │
-│  time    │  Seg &   │  Detection    │                   │
-│  Det.)   │  Det.)   │  w/ Text)     │                   │
-├──────────┴──────────┴───────────────┴───────────────────┤
-│              Model Service Layer                         │
-│         (Lazy Loading + Caching + GPU Support)           │
-├─────────────────────────────────────────────────────────┤
-│              Docker Container (CUDA-ready)                │
-├─────────────────────────────────────────────────────────┤
-│         AWS ECS / Kubernetes Deployment                   │
-└─────────────────────────────────────────────────────────┘
+app/
+├── main.py                       # ASGI entry point (create_app factory + lifespan)
+├── config.py                     # Pydantic Settings hydrated from env / .env
+├── dependencies.py               # FastAPI DI providers (services, repositories)
+├── core/
+│   └── logging.py                # Structured / plain-text log bootstrap
+├── middleware/
+│   └── auth.py                   # API-key middleware + rate limiter
+├── models/                       # Strategy pattern for CV models
+│   ├── base_model.py             #   BaseDetectionModel ABC + Detection / InferenceResult
+│   ├── model_factory.py          #   ModelFactory registry + singleton cache
+│   ├── yolo_model.py             #   YOLOv8 wrapper
+│   ├── detectron2_model.py       #   Mask R-CNN wrapper
+│   ├── grounding_dino.py         #   Open-set detector
+│   └── sam_model.py              #   Segment Anything Model wrapper
+├── repositories/                 # Persistence — routers never see these directly
+│   ├── inference_repository.py   #   IInferenceRepository + InMemory / Redis
+│   └── metrics_repository.py     #   IMetricsRepository + InMemory / Mongo
+├── services/                     # Orchestration
+│   ├── detection_service.py      #   Caching + timing + metrics wrapper
+│   ├── pipeline_service.py       #   Grounding DINO → SAM pipeline
+│   ├── explainability_service.py #   Grad-CAM / saliency
+│   └── metrics_service.py        #   Metrics aggregation façade
+├── routers/                      # Thin HTTP adapters
+│   ├── yolo_router.py            #   + /detect-base64 for webcam
+│   ├── detectron2_router.py
+│   ├── grounding_dino_router.py
+│   ├── sam_router.py
+│   ├── pipeline_router.py
+│   ├── explain_router.py         #   NEW · Grad-CAM
+│   └── metrics_router.py         #   NEW · benchmark dashboard
+├── schemas/detection.py          # Pydantic request/response contracts
+└── utils/
+    ├── image_utils.py            # read_upload_bytes / decode_image_bytes / …
+    ├── visualization.py          # draw_detections / draw_masks
+    └── annotation_utils.py
+
+deployment/
+├── aws/                          # CloudFormation + push scripts (ECS Fargate)
+└── k8s/                          # namespace, deployment, service, ingress, HPA
+
+tests/
+├── conftest.py                   # shared fixtures
+├── test_api.py                   # legacy endpoint contract tests
+├── test_repositories.py          # NEW · InMemory cache + metrics
+├── test_detection_service.py     # NEW · DetectionService orchestration
+└── test_new_endpoints.py         # NEW · /metrics, /detect-base64, /openapi.json
 ```
 
 ---
 
-## Models Studied
+## Getting started
 
-### 1. YOLOv8 (You Only Look Once v8)
-| Aspect | Detail |
-|--------|--------|
-| **Type** | Single-stage, anchor-free detector |
-| **Architecture** | CSPDarknet backbone → PANet neck → Detection head |
-| **Strength** | Real-time speed (100+ FPS on GPU) |
-| **Pre-training** | 80 COCO classes |
-| **Key Innovation** | Processes entire image in one forward pass |
+### Local development
 
-### 2. Detectron2 (Mask R-CNN)
-| Aspect | Detail |
-|--------|--------|
-| **Type** | Two-stage detector with mask branch |
-| **Architecture** | ResNet-50 + FPN → RPN → ROI Heads + Mask Head |
-| **Strength** | High-quality instance segmentation |
-| **Pre-training** | COCO instance segmentation |
-| **Key Innovation** | Separate region proposal and classification stages |
-
-### 3. Grounding DINO
-| Aspect | Detail |
-|--------|--------|
-| **Type** | Multi-modal, language-grounded detector |
-| **Architecture** | Swin Transformer (image) + BERT (text) → Cross-modal decoder |
-| **Strength** | Detect ANY object from text description |
-| **Pre-training** | Large-scale image-text pairs |
-| **Key Innovation** | Open-set detection — no fixed class vocabulary |
-
-### 4. SAM (Segment Anything Model)
-| Aspect | Detail |
-|--------|--------|
-| **Type** | Foundation model for segmentation |
-| **Architecture** | ViT image encoder + Prompt encoder + Mask decoder |
-| **Strength** | Universal segmentation from any prompt type |
-| **Pre-training** | SA-1B dataset (11M images, 1B+ masks) |
-| **Key Innovation** | Compute image embedding once, prompt many times |
-
----
-
-## Key Pipeline: Grounding DINO + SAM
-
-The combined pipeline achieves **open-vocabulary instance segmentation**:
-
-```
-Text: "red car on the street"
-          ↓
-  ┌─────────────────┐
-  │  Grounding DINO  │  ← Text + Image → Bounding boxes
-  └────────┬────────┘
-           ↓ boxes
-  ┌─────────────────┐
-  │       SAM        │  ← Boxes as prompts → Pixel masks
-  └────────┬────────┘
-           ↓
-  Detected + Segmented regions with natural language control
-```
-
-**Why this matters**: Traditional models detect fixed classes. This pipeline lets you describe *anything* and get precise segmentation — no retraining needed when requirements change.
-
----
-
-## Quick Start
-
-### Local Development
-
-```bash
+```powershell
 git clone <repo-url>
-cd Objection-Detection-Model
-python -m venv venv
-source venv/bin/activate  # Linux/Mac
-# venv\Scripts\activate   # Windows
+cd object-detection-api
 
+py -m venv .venv
+.\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
+
+# Detectron2 is not on PyPI — install from source (see requirements.txt notes)
+pip install "git+https://github.com/facebookresearch/detectron2.git"
+
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
+
+Swagger UI: <http://localhost:8000/docs> · ReDoc: <http://localhost:8000/redoc> · Health: <http://localhost:8000/health>
 
 ### Docker
 
 ```bash
-# GPU build (NVIDIA Container Toolkit required)
+# GPU (NVIDIA Container Toolkit required)
 docker-compose up --build
 
-# CPU-only build
+# CPU-only
 docker-compose --profile cpu up --build
 ```
 
-### Access
-- **Swagger UI**: http://localhost:8000/docs
-- **Health Check**: http://localhost:8000/health
+### Sanity call
+
+```bash
+curl -X POST "http://localhost:8000/api/v1/yolo/detect" \
+  -F "file=@sample_images/bus.jpg" \
+  -F "confidence=0.25"
+```
 
 ---
 
-## API Endpoints
+## API reference
 
-| Endpoint | Method | Model | Description |
-|----------|--------|-------|-------------|
-| `/api/v1/yolo/detect` | POST | YOLOv8 | Real-time object detection |
-| `/api/v1/yolo/detect-visualize` | POST | YOLOv8 | Detection + annotated image |
-| `/api/v1/detectron2/detect` | POST | Detectron2 | Instance segmentation |
-| `/api/v1/detectron2/detect-visualize` | POST | Detectron2 | Segmentation + visualization |
-| `/api/v1/grounding-dino/detect` | POST | G-DINO | Open-set text-based detection |
-| `/api/v1/sam/segment-auto` | POST | SAM | Auto-segment everything |
-| `/api/v1/sam/segment-points` | POST | SAM | Segment from click points |
-| `/api/v1/sam/segment-boxes` | POST | SAM | Segment from bounding boxes |
-| `/api/v1/pipeline/detect-and-segment` | POST | G-DINO+SAM | Text → Detect → Segment |
-| `/health` | GET | — | System health & model status |
+### Detection endpoints
 
-### Example: Grounding DINO + SAM Pipeline
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/api/v1/yolo/detect` | YOLOv8 detection |
+| POST | `/api/v1/yolo/detect-base64` | YOLOv8 detection from a base64 frame (webcam) |
+| POST | `/api/v1/yolo/detect-visualize` | Annotated JPEG response |
+| POST | `/api/v1/detectron2/detect` | Mask R-CNN detection + masks |
+| POST | `/api/v1/detectron2/detect-visualize` | Annotated JPEG response |
+| POST | `/api/v1/grounding-dino/detect` | Open-set detection by text prompt |
+| POST | `/api/v1/grounding-dino/detect-visualize` | Annotated JPEG response |
+| POST | `/api/v1/sam/segment-auto` | SAM automatic mask generator |
+| POST | `/api/v1/sam/segment-points` | SAM prompted by click points |
+| POST | `/api/v1/sam/segment-boxes` | SAM prompted by bounding boxes |
+| POST | `/api/v1/pipeline/detect-and-segment` | Grounding DINO → SAM (open-vocabulary segmentation) |
+| POST | `/api/v1/pipeline/detect-and-segment-visualize` | Same + annotated JPEG |
+
+### Explainability + telemetry endpoints
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/api/v1/explain/gradcam` | Grad-CAM / saliency heatmap for a YOLO detection |
+| GET  | `/api/v1/metrics/summary` | Per-model latency + throughput + cache-hit rate |
+| GET  | `/api/v1/metrics/recent` | Recent inference records (optionally by model) |
+| POST | `/api/v1/metrics/reset` | Wipe the in-memory metrics buffer (for benchmarks) |
+
+### System endpoints
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/` | API metadata + feature flags |
+| GET | `/health` | Liveness / readiness + per-model status |
+| GET | `/docs`, `/redoc`, `/openapi.json` | Interactive documentation |
+
+### Example — open-vocabulary pipeline
 
 ```bash
 curl -X POST "http://localhost:8000/api/v1/pipeline/detect-and-segment" \
@@ -162,19 +373,49 @@ curl -X POST "http://localhost:8000/api/v1/pipeline/detect-and-segment" \
   -F "text_prompt=person wearing helmet"
 ```
 
+### Example — Grad-CAM
+
+```bash
+curl -X POST "http://localhost:8000/api/v1/explain/gradcam" \
+  -F "file=@test_image.jpg" \
+  -F "detection_index=0"
+```
+
+Returns `{ "method": "grad-cam", "heatmap_base64": "data:image/png;base64,…", "caption": "…", "detections": [ … ] }`.
+
+---
+
+## Configuration
+
+Every setting lives in `app/config.py` and is overridable via environment variables or a `.env` file. The complete list is documented in [`.env.example`](.env.example). The most impactful ones:
+
+| Variable | Default | Effect |
+|---|---|---|
+| `AUTH_ENABLED` | `false` | Require `X-API-Key` header on protected routes |
+| `API_KEYS` | `demo-key-12345` | Comma-separated list of accepted keys |
+| `RATE_LIMIT_PER_MINUTE` | `60` | Fixed-window limit per key or client IP |
+| `CACHE_ENABLED` | `true` | Use the inference-result cache |
+| `REDIS_URL` | *(unset)* | If set, swap in Redis for the inference cache |
+| `INFERENCE_CACHE_TTL` | `3600` | Cache TTL, seconds |
+| `METRICS_ENABLED` | `true` | Track per-model latency + throughput |
+| `MONGO_URL` | *(unset)* | If set, persist metrics to MongoDB |
+| `LOG_JSON` | `false` | Emit JSON logs via `structlog` |
+| `DEVICE` | `auto` | `auto` / `cuda` / `cpu` |
+| `CORS_ORIGINS` | `*` | Comma-separated origins, or `*` |
+
 ---
 
 ## Deployment
 
-### AWS (ECS Fargate)
+### AWS ECS Fargate (CloudFormation)
 
 ```bash
 cd deployment/aws
-./ecr-push.sh          # Push image to ECR
-./deploy.sh            # Deploy via CloudFormation
+./ecr-push.sh          # Build image & push to ECR
+./deploy.sh            # Deploy VPC → ALB → ECS Fargate stack
 ```
 
-Infrastructure: VPC → ALB → ECS Fargate Service. See [deployment/aws/README.md](deployment/aws/README.md).
+See [deployment/aws/README.md](deployment/aws/README.md) for the full IaC walkthrough.
 
 ### Kubernetes
 
@@ -183,67 +424,50 @@ kubectl apply -f deployment/k8s/namespace.yaml
 kubectl apply -f deployment/k8s/deployment.yaml
 kubectl apply -f deployment/k8s/service.yaml
 kubectl apply -f deployment/k8s/ingress.yaml
-kubectl apply -f deployment/k8s/hpa.yaml        # Auto-scaling
+kubectl apply -f deployment/k8s/hpa.yaml
 ```
 
-Includes readiness/liveness probes, HPA (autoscaling on CPU/memory), and rolling update strategy.
+Includes readiness / liveness probes on `/health`, an HPA scaling on CPU + memory, and a rolling-update strategy.
 
----
+### Hugging Face Spaces
 
-## Project Structure
-
-```
-├── app/
-│   ├── main.py                 # FastAPI entry point
-│   ├── config.py               # Centralized configuration
-│   ├── models/
-│   │   ├── base_model.py       # Abstract interface (Strategy Pattern)
-│   │   ├── yolo_model.py       # YOLOv8 wrapper
-│   │   ├── detectron2_model.py # Detectron2 Mask R-CNN wrapper
-│   │   ├── grounding_dino.py   # Grounding DINO wrapper
-│   │   └── sam_model.py        # SAM wrapper
-│   ├── routers/                # API endpoint definitions
-│   ├── schemas/                # Pydantic request/response models
-│   └── utils/                  # Image processing & visualization
-├── tests/                      # pytest test suite
-├── deployment/
-│   ├── aws/                    # ECR + ECS Fargate + CloudFormation
-│   └── k8s/                    # Kubernetes manifests + HPA
-├── Dockerfile                  # Multi-stage CUDA-ready build
-├── docker-compose.yml          # Local development orchestration
-└── requirements.txt
-```
-
----
-
-## Engineering Practices
-
-| Practice | Implementation |
-|----------|---------------|
-| **Model Abstraction** | Strategy Pattern via `BaseDetectionModel` ABC |
-| **Lazy Loading** | Models load on first request, not at startup |
-| **API Versioning** | All routes under `/api/v1/` prefix |
-| **Input Validation** | Pydantic schemas with type constraints |
-| **Health Monitoring** | `/health` endpoint reports per-model status |
-| **Container Security** | Non-root user, multi-stage build, `.dockerignore` |
-| **Auto-scaling** | K8s HPA on CPU/memory; ECS desired count |
-| **IaC** | CloudFormation for AWS; declarative K8s manifests |
+Add HF Spaces frontmatter to a copy of the README and switch `EXPOSE 8000` → `EXPOSE 7860` in the Dockerfile. The layered architecture is unchanged — models stream cache misses through the in-memory backend if no Redis is configured.
 
 ---
 
 ## Testing
 
 ```bash
-pytest          # Run all tests
-pytest -v       # Verbose output
+pytest -v                      # everything
+pytest tests/test_repositories.py -v
+pytest tests/test_detection_service.py -v
+pytest tests/test_new_endpoints.py -v
 ```
+
+The suite is designed to run **without any model weights or GPU**. `tests/test_detection_service.py` substitutes a `StubModel` into the `ModelFactory` registry so cache / metrics / DI behaviour is verifiable in seconds.
+
+---
+
+## Roadmap
+
+The [`Improvements.md`](Improvements.md) roadmap tracks the full CV/MLOps trajectory. Backend items completed by this refactor:
+
+- Clean architecture (Strategy · Factory · Repository · Service · DI) — **Phase 9**
+- API-key auth + rate limiting — **Phase 6**
+- Grad-CAM explainability endpoint — **Phase 10**
+- Per-model live metrics + benchmark endpoint — **Phase 11**
+- Structured logging — **Phase 9**
+- Base64 detect endpoint (webcam-ready) — **Phase 2 preparation**
+- Test suite covering services + repositories — **Phase 5**
+
+Still open: Next.js frontend, live demo URL, GitHub Actions CI/CD, video-file inference.
 
 ---
 
 ## References
 
-- Jocher, G., Chaurasia, A., & Qiu, J. (2023). *Ultralytics YOLOv8*. https://github.com/ultralytics/ultralytics
-- Wu, Y., Kirillov, A., Massa, F., Lo, W.-Y., & Girshick, R. (2019). *Detectron2*. https://github.com/facebookresearch/detectron2
+- Jocher, G., Chaurasia, A., & Qiu, J. (2023). *Ultralytics YOLOv8*. <https://github.com/ultralytics/ultralytics>
+- Wu, Y., Kirillov, A., Massa, F., Lo, W.-Y., & Girshick, R. (2019). *Detectron2*. <https://github.com/facebookresearch/detectron2>
 - Liu, S., Zeng, Z., et al. (2023). *Grounding DINO: Marrying DINO with Grounded Pre-Training for Open-Set Object Detection*. arXiv:2303.05499
 - Kirillov, A., Mintun, E., et al. (2023). *Segment Anything*. arXiv:2304.02643
 
@@ -253,4 +477,3 @@ pytest -v       # Verbose output
 
 **Shefayat E Shams Adib**
 Islamic University of Technology (IUT), Dhaka
-shefayatadib@iut-dhaka.edu
