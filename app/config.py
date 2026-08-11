@@ -1,77 +1,115 @@
 """
-Application configuration management.
-Handles environment variables, model paths, and runtime settings.
+Application configuration.
+
+All runtime knobs are collected here and hydrated from environment variables /
+``.env``.  ``get_settings()`` is ``lru_cache``-d so import cost is amortized.
 """
 
-import os
-from pathlib import Path
-from pydantic_settings import BaseSettings
+from __future__ import annotations
+
 from functools import lru_cache
+from pathlib import Path
+from typing import List, Optional
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    """Application settings loaded from environment variables."""
+    """Environment-driven settings for the API."""
 
-    # App Settings
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    # -- Application ---------------------------------------------------------
     APP_NAME: str = "CV Detection Platform"
-    APP_VERSION: str = "1.0.0"
-    DEBUG: bool = os.getenv("DEBUG", "false").lower() == "true"
+    APP_VERSION: str = "2.0.0"
+    DEBUG: bool = False
 
-    # Server Settings
+    # -- Server --------------------------------------------------------------
     HOST: str = "0.0.0.0"
     PORT: int = 8000
+    CORS_ORIGINS: str = "*"  # comma-separated list, "*" allows any origin
 
-    # Model Settings
-    MODEL_CACHE_DIR: str = os.getenv("MODEL_CACHE_DIR", str(Path.home() / ".cache" / "cv_models"))
-    DEVICE: str = os.getenv("DEVICE", "auto")  # "auto", "cuda", "cpu"
+    # -- Model runtime -------------------------------------------------------
+    MODEL_CACHE_DIR: str = str(Path.home() / ".cache" / "cv_models")
+    DEVICE: str = "auto"  # "auto" | "cuda" | "cpu"
 
-    # YOLO Settings
-    YOLO_MODEL_NAME: str = os.getenv("YOLO_MODEL_NAME", "yolov8n.pt")  # nano for speed, swap to yolov8m.pt for accuracy
-    YOLO_CONFIDENCE: float = float(os.getenv("YOLO_CONFIDENCE", "0.25"))
-    YOLO_IOU_THRESHOLD: float = float(os.getenv("YOLO_IOU_THRESHOLD", "0.45"))
+    # -- YOLOv8 --------------------------------------------------------------
+    YOLO_MODEL_NAME: str = "yolov8n.pt"
+    YOLO_CONFIDENCE: float = 0.25
+    YOLO_IOU_THRESHOLD: float = 0.45
 
-    # Detectron2 Settings
-    DETECTRON2_CONFIG: str = os.getenv(
-        "DETECTRON2_CONFIG",
-        "COCO-InstanceSegmentation/mask_rcnn_R_50_FPN_3x.yaml"
-    )
-    DETECTRON2_CONFIDENCE: float = float(os.getenv("DETECTRON2_CONFIDENCE", "0.5"))
+    # -- Detectron2 ----------------------------------------------------------
+    DETECTRON2_CONFIG: str = "COCO-InstanceSegmentation/mask_rcnn_R_50_FPN_3x.yaml"
+    DETECTRON2_CONFIDENCE: float = 0.5
 
-    # Grounding DINO Settings
-    GROUNDING_DINO_MODEL: str = os.getenv(
-        "GROUNDING_DINO_MODEL",
-        "IDEA-Research/grounding-dino-tiny"
-    )
-    GROUNDING_DINO_BOX_THRESHOLD: float = float(os.getenv("GROUNDING_DINO_BOX_THRESHOLD", "0.35"))
-    GROUNDING_DINO_TEXT_THRESHOLD: float = float(os.getenv("GROUNDING_DINO_TEXT_THRESHOLD", "0.25"))
+    # -- Grounding DINO ------------------------------------------------------
+    GROUNDING_DINO_MODEL: str = "IDEA-Research/grounding-dino-tiny"
+    GROUNDING_DINO_BOX_THRESHOLD: float = 0.35
+    GROUNDING_DINO_TEXT_THRESHOLD: float = 0.25
 
-    # SAM Settings
-    SAM_MODEL_TYPE: str = os.getenv("SAM_MODEL_TYPE", "vit_b")  # vit_b, vit_l, vit_h
-    SAM_CHECKPOINT: str = os.getenv("SAM_CHECKPOINT", "")  # Auto-downloaded if empty
+    # -- SAM -----------------------------------------------------------------
+    SAM_MODEL_TYPE: str = "vit_b"
+    SAM_CHECKPOINT: str = ""
 
-    # Upload Settings
-    MAX_IMAGE_SIZE: int = int(os.getenv("MAX_IMAGE_SIZE", str(10 * 1024 * 1024)))  # 10MB
-    ALLOWED_EXTENSIONS: list = [".jpg", ".jpeg", ".png", ".bmp", ".webp"]
+    # -- Upload constraints --------------------------------------------------
+    MAX_IMAGE_SIZE: int = 10 * 1024 * 1024  # 10 MB
+    ALLOWED_EXTENSIONS: List[str] = [".jpg", ".jpeg", ".png", ".bmp", ".webp"]
 
-    # Logging
-    LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
+    # -- Logging -------------------------------------------------------------
+    LOG_LEVEL: str = "INFO"
+    LOG_JSON: bool = False  # emit structured JSON logs via structlog
 
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
+    # -- Cache backend -------------------------------------------------------
+    CACHE_ENABLED: bool = True
+    INFERENCE_CACHE_TTL: int = 3600  # seconds
+    INFERENCE_CACHE_MAX_ENTRIES: int = 512  # only used by in-memory backend
+    REDIS_URL: Optional[str] = None  # if set, RedisInferenceRepository is used
+
+    # -- Metrics backend -----------------------------------------------------
+    METRICS_ENABLED: bool = True
+    METRICS_WINDOW_SIZE: int = 500  # in-memory ring buffer per model
+    MONGO_URL: Optional[str] = None
+    MONGO_DB_NAME: str = "cv_detection"
+    MONGO_METRICS_COLLECTION: str = "inference_metrics"
+
+    # -- Authentication ------------------------------------------------------
+    AUTH_ENABLED: bool = False
+    # Comma-separated list of accepted API keys.  When AUTH_ENABLED is False
+    # the header is not checked at all - the demo remains open.
+    API_KEYS: str = "demo-key-12345"
+    RATE_LIMIT_PER_MINUTE: int = 60
+
+    # -- Convenience derived values -----------------------------------------
+    @property
+    def api_keys(self) -> List[str]:
+        return [k.strip() for k in self.API_KEYS.split(",") if k.strip()]
+
+    @property
+    def cors_origin_list(self) -> List[str]:
+        if self.CORS_ORIGINS.strip() == "*":
+            return ["*"]
+        return [o.strip() for o in self.CORS_ORIGINS.split(",") if o.strip()]
 
 
-@lru_cache()
+@lru_cache
 def get_settings() -> Settings:
-    """Get cached application settings."""
     return Settings()
 
 
 def get_device() -> str:
-    """Determine the best available device (CUDA or CPU)."""
-    import torch
-
+    """Resolve ``settings.DEVICE`` to a concrete torch device string."""
     settings = get_settings()
-    if settings.DEVICE == "auto":
+    if settings.DEVICE != "auto":
+        return settings.DEVICE
+    try:
+        import torch
+
         return "cuda" if torch.cuda.is_available() else "cpu"
-    return settings.DEVICE
+    except Exception:
+        return "cpu"
+
+

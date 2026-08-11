@@ -1,14 +1,21 @@
 """
-Pydantic schemas for API request/response validation.
-Ensures type safety and generates automatic Swagger documentation.
+Pydantic schemas for request / response validation.
+
+Kept broadly backwards compatible with v1 of the API - existing consumers
+receive the same fields, plus the newly exposed ``inference_time_ms`` and
+``cached`` flags on every detection response.
 """
 
-from pydantic import BaseModel, Field
-from typing import Any, Dict, List, Optional
+from __future__ import annotations
+
 from enum import Enum
+from typing import Any, Dict, List, Optional, Tuple
+
+from pydantic import BaseModel, Field, field_validator
 
 
 # ─── Enums ────────────────────────────────────────────
+
 
 class ModelType(str, Enum):
     YOLO = "yolov8"
@@ -26,58 +33,67 @@ class SAMMode(str, Enum):
 
 # ─── Request Schemas ──────────────────────────────────
 
+
 class YOLORequest(BaseModel):
-    """Parameters for YOLO detection."""
-    confidence: float = Field(0.25, ge=0.0, le=1.0, description="Confidence threshold")
-    iou_threshold: float = Field(0.45, ge=0.0, le=1.0, description="IoU threshold for NMS")
-    classes: Optional[List[int]] = Field(None, description="Filter specific class IDs")
-    max_detections: int = Field(300, ge=1, le=1000, description="Max detections")
+    confidence: float = Field(0.25, ge=0.0, le=1.0)
+    iou_threshold: float = Field(0.45, ge=0.0, le=1.0)
+    classes: Optional[List[int]] = None
+    max_detections: int = Field(300, ge=1, le=1000)
 
 
 class Detectron2Request(BaseModel):
-    """Parameters for Detectron2 detection."""
-    confidence: float = Field(0.5, ge=0.0, le=1.0, description="Confidence threshold")
-    return_masks: bool = Field(True, description="Include segmentation masks")
+    confidence: float = Field(0.5, ge=0.0, le=1.0)
+    return_masks: bool = True
 
 
 class GroundingDINORequest(BaseModel):
-    """Parameters for Grounding DINO detection."""
-    text_prompt: str = Field(..., description="Text description of objects to detect (separate multiple with '.')")
-    box_threshold: float = Field(0.35, ge=0.0, le=1.0, description="Box confidence threshold")
-    text_threshold: float = Field(0.25, ge=0.0, le=1.0, description="Text matching threshold")
+    text_prompt: str = Field(..., min_length=1, max_length=500)
+    box_threshold: float = Field(0.35, ge=0.0, le=1.0)
+    text_threshold: float = Field(0.25, ge=0.0, le=1.0)
+
+    @field_validator("text_prompt")
+    @classmethod
+    def _clean(cls, v: str) -> str:
+        return v.strip()
 
 
 class SAMRequest(BaseModel):
-    """Parameters for SAM segmentation."""
-    mode: SAMMode = Field(SAMMode.AUTO, description="Segmentation mode")
-    point_coords: Optional[List[List[float]]] = Field(None, description="Point coordinates [[x1,y1], [x2,y2]]")
-    point_labels: Optional[List[int]] = Field(None, description="Point labels (1=foreground, 0=background)")
-    boxes: Optional[List[List[float]]] = Field(None, description="Bounding boxes [[x1,y1,x2,y2]]")
-    multimask_output: bool = Field(True, description="Return multiple masks per prompt")
+    mode: SAMMode = SAMMode.AUTO
+    point_coords: Optional[List[List[float]]] = None
+    point_labels: Optional[List[int]] = None
+    boxes: Optional[List[List[float]]] = None
+    multimask_output: bool = True
 
 
 class PipelineRequest(BaseModel):
-    """Parameters for Grounding DINO + SAM pipeline."""
-    text_prompt: str = Field(..., description="Text description of objects to detect")
-    box_threshold: float = Field(0.35, ge=0.0, le=1.0, description="Detection confidence")
-    return_visualization: bool = Field(False, description="Include annotated image")
+    text_prompt: str = Field(..., min_length=1, max_length=500)
+    box_threshold: float = Field(0.35, ge=0.0, le=1.0)
+    return_visualization: bool = False
+
+
+class Base64ImageRequest(BaseModel):
+    """Used by the webcam detect endpoint to skip multipart overhead."""
+
+    image: str = Field(..., description="Base64 image (may include data: prefix)")
+    confidence: float = Field(0.25, ge=0.0, le=1.0)
+    iou_threshold: float = Field(0.45, ge=0.0, le=1.0)
 
 
 # ─── Response Schemas ─────────────────────────────────
 
+
 class Detection(BaseModel):
-    """Single detection result."""
     id: int
-    bbox: List[float] = Field(description="Bounding box [x1, y1, x2, y2]")
+    bbox: List[float] = Field(description="[x1, y1, x2, y2]")
     confidence: float
     class_id: Optional[int] = None
     class_name: Optional[str] = None
     label: Optional[str] = None
     mask_rle: Optional[Dict[str, Any]] = None
+    mask_shape: Optional[List[int]] = None
 
 
 class Segment(BaseModel):
-    """Single segmentation result."""
     id: int
     score: Optional[float] = None
     area: int
@@ -89,17 +105,17 @@ class Segment(BaseModel):
 
 
 class DetectionResponse(BaseModel):
-    """Response for detection endpoints."""
     model: str
     detections: List[Detection]
     count: int
     image_shape: List[int]
+    inference_time_ms: Optional[float] = None
+    cached: Optional[bool] = None
     metadata: Dict[str, Any] = {}
     text_prompt: Optional[str] = None
 
 
 class SegmentationResponse(BaseModel):
-    """Response for segmentation endpoints."""
     model: str
     mode: str
     segments: List[Segment]
@@ -109,7 +125,6 @@ class SegmentationResponse(BaseModel):
 
 
 class PipelineResponse(BaseModel):
-    """Response for combined pipeline."""
     detection_model: str = "grounding_dino"
     segmentation_model: str = "sam"
     text_prompt: str
@@ -118,17 +133,39 @@ class PipelineResponse(BaseModel):
     detection_count: int
     segment_count: int
     image_shape: List[int]
+    inference_time_ms: Optional[float] = None
+
+
+class ExplainResponse(BaseModel):
+    method: str = Field(description="'grad-cam' or 'saliency-fallback'")
+    heatmap_base64: Optional[str] = None
+    caption: Optional[str] = None
+    detections: List[Dict[str, Any]] = []
+    target_detection: Optional[Dict[str, Any]] = None
+
+
+class MetricRow(BaseModel):
+    total_requests: int
+    cache_hit_rate: float
+    avg_latency_ms: float
+    p50_latency_ms: Optional[float] = None
+    p95_latency_ms: Optional[float] = None
+    avg_detections: float
+    last_seen: Optional[str] = None
+
+
+# The summary endpoint returns Dict[str, MetricRow] directly. We avoid a
+# wrapper model since Pydantic v2 dropped __root__ in favour of RootModel;
+# a plain dict keeps the OpenAPI schema simple.
 
 
 class HealthResponse(BaseModel):
-    """Health check response."""
     status: str
     version: str
     models: Dict[str, Dict[str, Any]]
 
 
 class ModelInfoResponse(BaseModel):
-    """Model information response."""
     model_name: str
     is_loaded: bool
     type: str
