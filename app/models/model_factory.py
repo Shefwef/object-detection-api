@@ -6,13 +6,20 @@ models can be plugged in via :meth:`ModelFactory.register` without touching
 callers - open for extension, closed for modification.
 
     ModelFactory.create(ModelType.YOLO) -> YOLODetector
+
+Registration is *tolerant*: if the heavy ML dependency for a particular
+model isn't installed (torch, transformers, segment-anything, ...) we log
+a warning and skip that model instead of crashing at import time.  This
+keeps unit tests, CI, and stripped-down deployments happy while still
+loading everything on a full runtime.
 """
 
 from __future__ import annotations
 
-from enum import Enum
-from typing import Dict, Type
+import importlib
 import logging
+from enum import Enum
+from typing import Dict, Tuple, Type
 
 from app.models.base_model import BaseDetectionModel
 
@@ -55,7 +62,7 @@ class ModelFactory:
         model_class = cls._registry.get(model_type)
         if model_class is None:
             raise ValueError(
-                f"Unknown model type: {model_type!r}. "
+                f"Unknown or unavailable model type: {model_type!r}. "
                 f"Registered: {[t.value for t in cls.registered_types()]}"
             )
         return model_class()
@@ -81,21 +88,38 @@ class ModelFactory:
         cls._singletons.clear()
 
 
+# ─── Default registrations (tolerant of missing deps) ─────────────────────
+
+
+_DEFAULT_REGISTRATIONS: Tuple[Tuple[ModelType, str, str], ...] = (
+    (ModelType.YOLO, "app.models.yolo_model", "YOLODetector"),
+    (ModelType.DETECTRON2, "app.models.detectron2_model", "Detectron2Detector"),
+    (ModelType.GROUNDING_DINO, "app.models.grounding_dino", "GroundingDINODetector"),
+    (ModelType.SAM, "app.models.sam_model", "SAMSegmenter"),
+)
+
+
 def _register_default_models() -> None:
-    """Populate the registry with the four models shipped by this project.
+    """Try to register every shipped model; skip any that can't import.
 
-    Imports are performed lazily inside the function to avoid pulling heavy
-    ML dependencies at module import time (crucial for docs / unit tests).
+    Rationale: individual model modules pull in heavy ML libraries (torch,
+    transformers, segment-anything, detectron2). If one is missing on the
+    host (e.g. the CI runner, a stripped Docker image, or a laptop that
+    hasn't set up CUDA yet), we don't want that to bring down the whole
+    factory. The affected endpoints will still fail on invocation with a
+    clear error, but the API - and every other model - keeps working.
     """
-    from app.models.yolo_model import YOLODetector
-    from app.models.detectron2_model import Detectron2Detector
-    from app.models.grounding_dino import GroundingDINODetector
-    from app.models.sam_model import SAMSegmenter
-
-    ModelFactory.register(ModelType.YOLO, YOLODetector)
-    ModelFactory.register(ModelType.DETECTRON2, Detectron2Detector)
-    ModelFactory.register(ModelType.GROUNDING_DINO, GroundingDINODetector)
-    ModelFactory.register(ModelType.SAM, SAMSegmenter)
+    for model_type, module_path, class_name in _DEFAULT_REGISTRATIONS:
+        try:
+            module = importlib.import_module(module_path)
+            model_class = getattr(module, class_name)
+            ModelFactory.register(model_type, model_class)
+        except Exception as exc:  # noqa: BLE001 - we truly want to swallow all
+            logger.warning(
+                "Skipping %s registration (missing dependency?): %s",
+                model_type.value,
+                exc,
+            )
 
 
 _register_default_models()

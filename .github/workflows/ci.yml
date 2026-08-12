@@ -39,7 +39,11 @@ jobs:
 
       - name: Run repository + service + endpoint tests
         run: |
-          pytest tests/test_repositories.py tests/test_detection_service.py -v
+          pytest \
+            tests/test_repositories.py \
+            tests/test_detection_service.py \
+            tests/test_new_endpoints.py \
+            -v
 
   frontend-build:
     runs-on: ubuntu-latest

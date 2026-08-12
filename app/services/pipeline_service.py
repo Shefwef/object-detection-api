@@ -11,16 +11,22 @@ the metrics dashboard shows the pipeline as its own row.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 import logging
 import time
 
 import numpy as np
 
 from app.models.model_factory import ModelFactory, ModelType
-from app.models.grounding_dino import GroundingDINODetector
-from app.models.sam_model import SAMSegmenter
 from app.repositories.metrics_repository import IMetricsRepository, MetricRecord
+
+if TYPE_CHECKING:
+    # These imports pull in torch / transformers / segment-anything.
+    # Gate them behind TYPE_CHECKING so the module is importable in
+    # stripped-down environments (CI, minimal Docker layers). Duck typing
+    # covers the actual method calls at runtime.
+    from app.models.grounding_dino import GroundingDINODetector
+    from app.models.sam_model import SAMSegmenter
 
 logger = logging.getLogger(__name__)
 
@@ -35,10 +41,10 @@ class PipelineService:
 
     # -- Model accessors -----------------------------------------------------
 
-    def _gdino(self) -> GroundingDINODetector:
+    def _gdino(self) -> "GroundingDINODetector":
         return ModelFactory.get_or_create(ModelType.GROUNDING_DINO)  # type: ignore[return-value]
 
-    def _sam(self) -> SAMSegmenter:
+    def _sam(self) -> "SAMSegmenter":
         return ModelFactory.get_or_create(ModelType.SAM)  # type: ignore[return-value]
 
     # -- Public API ----------------------------------------------------------

@@ -55,9 +55,15 @@ def _register_stub():
     ModelFactory.reset()
     yield
     ModelFactory.reset()
-    # Restore the real registration so subsequent tests get the real class.
-    from app.models.yolo_model import YOLODetector
-    ModelFactory.register(ModelType.YOLO, YOLODetector)
+    # Attempt to restore the real class. In minimal environments (CI) the
+    # real model module may not import due to missing torch/ultralytics;
+    # that's fine - we swallow the failure so test teardown never leaks.
+    try:
+        from app.models.yolo_model import YOLODetector
+
+        ModelFactory.register(ModelType.YOLO, YOLODetector)
+    except Exception:
+        pass
 
 
 # ─── Tests ─────────────────────────────────────────────────────────────────
