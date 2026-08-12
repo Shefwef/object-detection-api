@@ -1,0 +1,48 @@
+# Render.com Blueprint
+# ────────────────────────────────────────────────────────────
+# One-click deploy: https://render.com/deploy?repo=<this-repo>
+# Or: connect the repo in Render dashboard → "Blueprint" → apply.
+#
+# Free tier notes:
+#   - 512 MB RAM, 0.1 CPU, sleeps after 15 min idle
+#   - Sufficient for YOLOv8 inference; heavier models (Detectron2,
+#     Grounding DINO, SAM) may OOM. Upgrade plan to "starter" (2 GB)
+#     if you need those.
+# ────────────────────────────────────────────────────────────
+
+services:
+  - type: web
+    name: object-detection-api
+    runtime: docker
+    plan: free
+    region: oregon                       # us-west; change if you prefer
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    autoDeploy: true                     # redeploy on every push to main
+    envVars:
+      - key: PORT
+        value: 10000                     # Render sets this automatically
+      - key: DEVICE
+        value: cpu                       # skip CUDA probe on CPU-only host
+      - key: LOG_JSON
+        value: "true"
+      - key: LOG_LEVEL
+        value: INFO
+      - key: CACHE_ENABLED
+        value: "true"
+      - key: INFERENCE_CACHE_TTL
+        value: "3600"
+      - key: METRICS_ENABLED
+        value: "true"
+      - key: AUTH_ENABLED
+        value: "false"                   # flip to "true" for prod
+      - key: CORS_ORIGINS
+        value: "*"                       # narrow to your Vercel URL later
+      - key: YOLO_MODEL_NAME
+        value: yolov8n.pt                # smallest variant to fit free tier
+      # Optional: attach managed backends (also free-tier friendly)
+      # - key: REDIS_URL
+      #   fromService:
+      #     type: redis
+      #     name: object-detection-cache
+      #     property: connectionString
