@@ -17,7 +17,14 @@ import type {
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
 function authHeaders(): Record<string, string> {
-  return API_KEY ? { "X-API-Key": API_KEY } : {};
+  const headers: Record<string, string> = {
+    // Bypass ngrok's browser-warning interstitial when the backend is
+    // exposed via ngrok. Ignored by every other server, so safe to send
+    // unconditionally.
+    "ngrok-skip-browser-warning": "true",
+  };
+  if (API_KEY) headers["X-API-Key"] = API_KEY;
+  return headers;
 }
 
 async function handle<T>(res: Response): Promise<T> {
