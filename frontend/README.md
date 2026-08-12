@@ -38,10 +38,10 @@ npm start
 
 1. Push `frontend/` to GitHub (already done as part of this monorepo).
 2. Import the repository in Vercel; set **Root Directory** to `frontend`.
-3. Add the environment variable `NEXT_PUBLIC_API_BASE_URL` pointing at your HF Space, e.g. `https://shefwef-object-detection-studio.hf.space`.
+3. Add the environment variable `NEXT_PUBLIC_API_BASE_URL` pointing at your Render backend, e.g. `https://object-detection-api.onrender.com`.
 4. Deploy. Vercel will auto-redeploy on every push to `main`.
 
-See [`../DEPLOY.md`](../DEPLOY.md) for the end-to-end walk-through (HF Spaces backend + Vercel frontend).
+See [`../DEPLOY.md`](../DEPLOY.md) for the end-to-end walk-through (Render backend + Vercel frontend, both free tier).
 
 ## Structure
 

@@ -1,112 +1,196 @@
-# Deploy — Hugging Face Spaces (backend) + Vercel (frontend)
+# Deploy — Render (backend) + Vercel (frontend)
 
-End-to-end walk-through to ship this project as a public live demo.
+End-to-end walk-through to ship this project as a public live demo on
+free tiers only.
 
-- **Backend** → Hugging Face Space (Docker SDK, free CPU or paid T4 GPU).
-- **Frontend** → Vercel (Next.js, free tier).
-- **CI** → GitHub Actions auto-syncs the backend to the Space on every push to `main`; Vercel auto-deploys the frontend on every push.
+- **Backend** → Render.com free web service (Docker, 512 MB RAM, sleeps
+  after 15 min idle, no credit card).
+- **Frontend** → Vercel free Hobby tier (Next.js, auto-deploys on push).
+- **CI** → Render redeploys automatically on every push to `main`;
+  Vercel does the same for the frontend.
 
-Total setup time on a clean account: **15–25 min**.
-
----
-
-## 1. Create the Hugging Face Space (backend)
-
-1. Sign in at <https://huggingface.co>.
-2. **New Space** → choose **Docker** SDK, **CPU basic (free)** for the demo (upgrade to a T4 later if needed).
-3. Space name: `object-detection-studio` (or your preference — the deploy workflow reads it from a secret).
-4. Visibility: Public.
-5. Skip the wizard's file-upload step — the GitHub Action will push the container config.
-6. Note your Space URL: `https://<username>-<space-name>.hf.space` (e.g. `https://shefwef-object-detection-studio.hf.space`).
-
-## 2. Create a Hugging Face access token
-
-1. <https://huggingface.co/settings/tokens> → **New token** → role **Write** → copy the value once.
-2. This becomes the `HF_TOKEN` secret in step 3.
-
-## 3. Add GitHub secrets
-
-Repository → **Settings → Secrets and variables → Actions → New repository secret**.
-
-| Secret | Value |
-|---|---|
-| `HF_TOKEN` | Token from step 2. |
-| `HF_USERNAME` | Your Hugging Face username (e.g. `shefwef`). |
-| `HF_SPACE_NAME` | The Space's slug (e.g. `object-detection-studio`). |
-
-That's it — the `deploy-hf.yml` workflow will fire on the next push to `main` that touches `app/`, `requirements.txt`, `Dockerfile`, or `deployment/hf/**`.
-
-Prefer to trigger manually the first time? **Actions tab → Deploy backend to Hugging Face Spaces → Run workflow**.
-
-## 4. Set backend environment variables on the Space
-
-Hugging Face Space → **Settings → Variables and secrets → New variable**. Everything below is optional — the Space runs with defaults if omitted.
-
-| Variable | Recommended value | Why |
-|---|---|---|
-| `CORS_ORIGINS` | `https://your-vercel-url.vercel.app` | Once you know your Vercel URL, lock CORS down. During bring-up you can leave the default `*`. |
-| `LOG_JSON` | `true` | Structured logs in the Space log viewer. |
-| `DEVICE` | `cpu` on free tier, `auto` on GPU tier | Skips the futile CUDA probe on CPU-only Spaces. |
-| `AUTH_ENABLED` | `false` | Keep the demo open. Flip to `true` + set `API_KEYS` when you're ready. |
-| `INFERENCE_CACHE_TTL` | `3600` | Default is fine. |
-
-If you attach an Upstash / Atlas free tier, add:
-
-| Variable | Value |
-|---|---|
-| `REDIS_URL` | `redis://default:<pw>@<host>:6379/0` |
-| `MONGO_URL` | `mongodb+srv://<user>:<pw>@<cluster>/cv_detection` |
-
-## 5. Verify the Space
-
-Once the Action's `push-to-space` job goes green:
-
-- Open `https://<username>-<space-name>.hf.space/docs` — Swagger should load.
-- `https://<username>-<space-name>.hf.space/health` should return `{"status":"healthy",...}`.
-- The **first** call to `/api/v1/yolo/detect` will download YOLOv8 weights (~6 MB) — expect a few seconds. Subsequent calls are cached.
-
-**Cold-start note:** free-tier Spaces sleep after inactivity; the first hit after sleep can take ~30 s while the container boots.
+Total setup time on clean accounts: **10–15 min**. Cost: **$0/month**.
 
 ---
 
-## 6. Deploy the frontend on Vercel
+## 0. Prerequisites
+
+- The repo is pushed to GitHub on `main`.
+- You have a Render account: <https://render.com> (sign in with GitHub — no card required).
+- You have a Vercel account: <https://vercel.com> (sign in with GitHub — no card required).
+
+---
+
+## 1. Deploy the backend to Render
+
+### Option A · One-click via Blueprint (recommended)
+
+`render.yaml` at the repo root describes the service, so Render sets
+everything up for you.
+
+1. Sign in at <https://dashboard.render.com>.
+2. Click **New → Blueprint**.
+3. Connect your GitHub account (first time only) and pick this repo.
+4. Render reads `render.yaml`, shows a summary (**web service · Docker · free plan**), and asks you to name the Blueprint. Accept the defaults.
+5. Click **Apply**.
+
+Render will now:
+- Build the Docker image from your `Dockerfile` (~5–8 min the first time).
+- Start the container listening on `$PORT` (Render sets it to `10000`).
+- Assign a public URL: `https://object-detection-api.onrender.com` (if the name is taken, Render appends a random suffix).
+
+### Option B · Manual web service (if you prefer clicking through)
+
+If Blueprint doesn't detect `render.yaml`, do it by hand:
+
+1. **New → Web Service** → pick your GitHub repo.
+2. Fill in:
+   - **Name**: `object-detection-api`
+   - **Region**: Oregon (or nearest to you)
+   - **Branch**: `main`
+   - **Runtime**: **Docker**
+   - **Dockerfile Path**: `./Dockerfile`
+   - **Plan**: **Free**
+   - **Health Check Path**: `/health`
+3. Under **Environment**, add these variables (same list as `render.yaml`):
+
+   | Key | Value |
+   |---|---|
+   | `DEVICE` | `cpu` |
+   | `LOG_JSON` | `true` |
+   | `LOG_LEVEL` | `INFO` |
+   | `CACHE_ENABLED` | `true` |
+   | `INFERENCE_CACHE_TTL` | `3600` |
+   | `METRICS_ENABLED` | `true` |
+   | `AUTH_ENABLED` | `false` |
+   | `CORS_ORIGINS` | `*` *(narrow later)* |
+   | `YOLO_MODEL_NAME` | `yolov8n.pt` |
+
+4. **Create Web Service**.
+
+## 2. Verify the backend
+
+Once the Render dashboard shows **Live** (green dot), open:
+
+- `https://<your-service>.onrender.com/` — should return API metadata + feature flags.
+- `https://<your-service>.onrender.com/health` — should return `{"status":"healthy", ...}`.
+- `https://<your-service>.onrender.com/docs` — Swagger UI loads.
+
+**First `/api/v1/yolo/detect` call downloads YOLOv8n weights (~6 MB)** —
+expect 5–15 s. Subsequent calls are hot.
+
+### What works on free tier (512 MB RAM)
+
+| Endpoint | Free-tier status |
+|---|---|
+| `/api/v1/yolo/detect` (all variants) | ✅ works |
+| `/api/v1/yolo/detect-base64` | ✅ works |
+| `/api/v1/metrics/summary` and `/recent` | ✅ works |
+| `/api/v1/explain/gradcam` | ✅ works (uses saliency fallback) |
+| `/api/v1/grounding-dino/detect` | ⚠️ may OOM (needs ~1 GB) |
+| `/api/v1/detectron2/detect` | ❌ Detectron2 not installed in the image |
+| `/api/v1/sam/segment-*` | ⚠️ may OOM (needs ~1 GB) |
+| `/api/v1/pipeline/detect-and-segment` | ⚠️ depends on both DINO + SAM |
+
+If you need everything, upgrade Render to **Starter ($7/mo, 2 GB RAM)** —
+no code changes required.
+
+---
+
+## 3. Deploy the frontend to Vercel
 
 1. Sign in at <https://vercel.com>.
 2. **Add New → Project → Import Git Repository** → pick this repo.
-3. **Root Directory**: `frontend`. Vercel auto-detects Next.js.
-4. **Environment Variables**:
+3. **Root Directory**: set to `frontend` (very important — the repo isn't a Next.js app at its root).
+4. Framework: Vercel auto-detects **Next.js**.
+5. **Environment Variables** — add one:
 
-   | Var | Value |
+   | Name | Value |
    |---|---|
-   | `NEXT_PUBLIC_API_BASE_URL` | `https://<username>-<space-name>.hf.space` |
-   | `NEXT_PUBLIC_API_KEY` | *(leave empty unless auth enabled)* |
+   | `NEXT_PUBLIC_API_BASE_URL` | `https://<your-render-service>.onrender.com` |
 
-5. **Deploy**.
+6. Click **Deploy**.
 
-Vercel gives you a URL like `https://object-detection-studio.vercel.app`. Every subsequent push to `main` auto-redeploys.
-
-## 7. Lock down CORS
-
-Now that you know the Vercel URL, go back to **HF Space → Settings → Variables** and set:
-
-```
-CORS_ORIGINS=https://object-detection-studio.vercel.app
-```
-
-Restart the Space (Settings → Restart). The backend now only accepts browser requests from your Vercel deployment.
+Vercel gives you a URL like `https://object-detection-studio.vercel.app`.
+Every subsequent push to `main` auto-redeploys.
 
 ---
 
-## 8. Optional — turn on API-key auth for production
+## 4. Lock down CORS (recommended)
 
-1. HF Space Variables:
+Now that you know your Vercel URL, tighten the backend so it only accepts
+requests from your frontend.
+
+1. Render dashboard → your service → **Environment** tab.
+2. Edit `CORS_ORIGINS`:
+   ```
+   CORS_ORIGINS=https://object-detection-studio.vercel.app
+   ```
+3. Click **Save, rebuild, and deploy**.
+
+Render redeploys in ~2 min. Verify from the browser that your frontend
+still talks to the API.
+
+---
+
+## 5. Optional — turn on API-key auth for production
+
+1. Render env:
    ```
    AUTH_ENABLED=true
    API_KEYS=demo-key-12345,another-prod-key
    RATE_LIMIT_PER_MINUTE=30
    ```
-2. Vercel env: set `NEXT_PUBLIC_API_KEY=demo-key-12345`. Redeploy.
-3. The middleware still keeps `/health`, `/docs`, `/redoc`, `/openapi.json`, and `/` open, so probes and Swagger keep working.
+2. Vercel env: `NEXT_PUBLIC_API_KEY=demo-key-12345`. Redeploy.
+3. The middleware still keeps `/health`, `/docs`, `/redoc`, `/openapi.json`, and `/` open, so probes + Swagger keep working.
+
+---
+
+## Environment variable summary
+
+### Render (backend)
+
+Required — set via `render.yaml` or Render dashboard:
+
+| Var | Value | Notes |
+|---|---|---|
+| `DEVICE` | `cpu` | Skip CUDA probe |
+| `LOG_JSON` | `true` | Structured logs |
+| `LOG_LEVEL` | `INFO` | |
+| `CACHE_ENABLED` | `true` | |
+| `INFERENCE_CACHE_TTL` | `3600` | Cache TTL seconds |
+| `METRICS_ENABLED` | `true` | |
+| `AUTH_ENABLED` | `false` | Set `true` for prod |
+| `CORS_ORIGINS` | `*` → then Vercel URL | Lock down after step 4 |
+| `YOLO_MODEL_NAME` | `yolov8n.pt` | Smallest to fit free tier |
+
+Optional (only if you attach managed backends):
+
+| Var | Value |
+|---|---|
+| `API_KEYS` | Comma-separated valid keys |
+| `RATE_LIMIT_PER_MINUTE` | `60` |
+| `REDIS_URL` | `redis://…` from Upstash / Render Redis |
+| `MONGO_URL` | `mongodb+srv://…` from Atlas |
+
+Render sets `PORT` automatically — the Dockerfile honours `$PORT`, so
+you never need to set it manually.
+
+### Vercel (frontend)
+
+| Var | Value |
+|---|---|
+| `NEXT_PUBLIC_API_BASE_URL` | Your Render URL, e.g. `https://object-detection-api.onrender.com` |
+| `NEXT_PUBLIC_API_KEY` | *(only if `AUTH_ENABLED=true` on backend)* |
+
+### GitHub secrets
+
+**None required.** Render and Vercel both auto-deploy from the GitHub
+integration — no tokens live in the repo.
+
+### What you can delete from GitHub secrets (if you had them)
+
+- `HF_TOKEN`, `HF_USERNAME`, `HF_SPACE_NAME` — no longer used.
 
 ---
 
@@ -114,22 +198,23 @@ Restart the Space (Settings → Restart). The backend now only accepts browser r
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| `403` on Space push | Wrong `HF_TOKEN` scope | Re-issue token with **Write** role. |
-| Space builds but `/docs` returns nothing | Space is still installing torch (~2 min) | Wait, then check Space logs. |
-| Frontend calls fail with CORS error | `CORS_ORIGINS` still `*` and browser blocks credentials, or set to the wrong URL | Set `CORS_ORIGINS` to the exact Vercel origin (no trailing slash). |
-| Frontend fetches `/api/backend/...` in production and 404s | Missing `NEXT_PUBLIC_API_BASE_URL` on Vercel | Set it to the absolute HF Space URL and redeploy. |
-| `429 Too Many Requests` | Rate limit tripped | Raise `RATE_LIMIT_PER_MINUTE` or disable auth. |
-| Detectron2 endpoints 500 | Not installed on the Space | Free HF Spaces skip Detectron2 by default (heavy source install). YOLO / DINO / SAM / pipeline still work. |
+| Build fails on Render with `Cannot find requirements` | Wrong branch selected | Confirm the service tracks `main` |
+| Container starts then exits with SIGTERM | OOM on 512 MB — heavy model got called | Only call `/api/v1/yolo/*` on free tier; upgrade to Starter for others |
+| `502 Bad Gateway` for ~30 s after 15 min idle | Free tier sleeps — first request wakes it | Wait and retry; upgrade to remove sleep |
+| CORS error in browser after step 4 | `CORS_ORIGINS` mistyped (trailing slash, http vs https) | Copy the exact Vercel origin — no trailing slash |
+| Frontend fetches fail with `404` at `/api/backend/...` | Missing `NEXT_PUBLIC_API_BASE_URL` on Vercel | Set it to the absolute Render URL and redeploy |
+| First model call takes 15 s | YOLOv8 weight download | Normal on first call; cached thereafter |
+| `429 Too Many Requests` | Rate limit hit | Raise `RATE_LIMIT_PER_MINUTE` or turn off auth |
 
 ---
 
 ## Cost summary
 
-- **HF Space CPU basic**: free, sleeps after inactivity.
-- **HF Space CPU upgrade** (persistent, faster): ~$0.03/hr.
-- **HF Space Nvidia T4 small**: ~$0.60/hr — turn on only during demo sessions if you want real-time YOLO.
-- **Vercel Hobby**: free.
-- **Upstash Redis free tier**: 10k commands/day (plenty for a demo).
-- **MongoDB Atlas M0**: free 512 MB shared cluster.
+- **Render web service (free)**: $0. Sleeps after 15 min idle, ~30 s cold start.
+- **Render web service (Starter)**: $7/mo — 2 GB RAM, no sleep, all models fit.
+- **Vercel Hobby**: $0.
+- **Upstash Redis free**: 10 k commands/day.
+- **MongoDB Atlas M0**: 512 MB shared cluster, $0.
 
-Total to run permanently: **$0/month** on free tiers with tolerable cold starts. Recommended when actively demoing: bump the Space to CPU upgrade for a few hours.
+Permanent free demo: **$0/month** with cold starts.
+Always-on with every model working: **$7/month** (Render Starter upgrade).

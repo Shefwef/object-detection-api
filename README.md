@@ -427,19 +427,19 @@ Every setting lives in `app/config.py` and is overridable via environment variab
 
 ## Deployment
 
-**Fastest path (free-tier live demo):** Hugging Face Spaces (backend) + Vercel (frontend). Both auto-deploy from GitHub. Follow the step-by-step [`DEPLOY.md`](DEPLOY.md).
+**Fastest path (free-tier live demo):** Render.com (backend) + Vercel (frontend). Both auto-deploy from GitHub, no credit card required. Follow the step-by-step [`DEPLOY.md`](DEPLOY.md).
 
-### Hugging Face Spaces (backend)
+### Render.com (backend)
 
-- GitHub Actions workflow `.github/workflows/deploy-hf.yml` pushes to your Space on every merge to `main`.
-- Required secrets: `HF_TOKEN`, `HF_USERNAME`, `HF_SPACE_NAME`.
-- Space README lives at [`deployment/hf/README.md`](deployment/hf/README.md); the workflow copies it into the Space on each push.
-- The container Dockerfile honours `$PORT`, so the same image works on HF (7860), local (8000), and cloud runners.
+- [`render.yaml`](render.yaml) at the repo root is a Render Blueprint — one click provisions the Docker web service with the right env vars.
+- Free tier: 512 MB RAM, sleeps after 15 min idle. Reliable for YOLOv8; heavier models (Detectron2, DINO, SAM) may OOM. Upgrade to Starter ($7/mo, 2 GB) for the full stack.
+- Redeploys automatically on every push to `main`.
+- The container Dockerfile honours `$PORT`, so the same image runs locally, on Render, and on any cloud runner.
 
 ### Vercel (frontend)
 
 - Import the repo in Vercel with **Root Directory** = `frontend`.
-- Set `NEXT_PUBLIC_API_BASE_URL` to your HF Space URL.
+- Set `NEXT_PUBLIC_API_BASE_URL` to your Render URL, e.g. `https://object-detection-api.onrender.com`.
 - Auto-deploys on every push.
 
 ### AWS ECS Fargate (CloudFormation)
@@ -463,10 +463,6 @@ kubectl apply -f deployment/k8s/hpa.yaml
 ```
 
 Includes readiness / liveness probes on `/health`, an HPA scaling on CPU + memory, and a rolling-update strategy.
-
-### Hugging Face Spaces
-
-Add HF Spaces frontmatter to a copy of the README and switch `EXPOSE 8000` → `EXPOSE 7860` in the Dockerfile. The layered architecture is unchanged — models stream cache misses through the in-memory backend if no Redis is configured.
 
 ---
 
