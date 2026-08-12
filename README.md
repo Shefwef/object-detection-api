@@ -8,6 +8,19 @@
 
 ---
 
+## Live demo
+
+| Component | URL | Notes |
+|---|---|---|
+| **Frontend** (Next.js on Vercel) | <https://object-detection-api-psi.vercel.app> | Always on |
+| **Backend** (FastAPI via ngrok tunnel) | <https://unnecessarily-menispermaceous-rickey.ngrok-free.dev> | Live only while the maintainer's laptop is on — see [DEPLOY.md](DEPLOY.md) |
+| **API docs (Swagger)** | <https://unnecessarily-menispermaceous-rickey.ngrok-free.dev/docs> | Interactive |
+| **Health probe** | <https://unnecessarily-menispermaceous-rickey.ngrok-free.dev/health> | Public |
+
+> The backend URL is an ngrok Free tunnel, which means it rotates when the tunnel restarts. If it doesn't respond, the maintainer's laptop is offline — try again later or set up your own copy in 15 min via [DEPLOY.md](DEPLOY.md).
+
+---
+
 ## Table of contents
 
 1. [Highlights](#highlights)
@@ -427,20 +440,20 @@ Every setting lives in `app/config.py` and is overridable via environment variab
 
 ## Deployment
 
-**Fastest path (free-tier live demo):** Render.com (backend) + Vercel (frontend). Both auto-deploy from GitHub, no credit card required. Follow the step-by-step [`DEPLOY.md`](DEPLOY.md).
+The current live demo runs as **Vercel (frontend) + local FastAPI exposed via ngrok (backend)** — the honest free-tier answer that actually serves inference. Full walkthrough in [`DEPLOY.md`](DEPLOY.md).
 
-### Render.com (backend)
+### Current live setup (Vercel + ngrok)
 
-- [`render.yaml`](render.yaml) at the repo root is a Render Blueprint — one click provisions the Docker web service with the right env vars.
-- Free tier: 512 MB RAM, sleeps after 15 min idle. Reliable for YOLOv8; heavier models (Detectron2, DINO, SAM) may OOM. Upgrade to Starter ($7/mo, 2 GB) for the full stack.
-- Redeploys automatically on every push to `main`.
-- The container Dockerfile honours `$PORT`, so the same image runs locally, on Render, and on any cloud runner.
+- Frontend is a standard Vercel Hobby deployment (`Root Directory: frontend`, one env var `NEXT_PUBLIC_API_BASE_URL`).
+- Backend runs locally with `uvicorn app.main:app` and is published through ngrok Free (`ngrok http 8000`).
+- The React client always sends the `ngrok-skip-browser-warning` header so ngrok's interstitial doesn't corrupt JSON responses.
+- Trade-off: the ngrok URL rotates whenever the tunnel restarts and only serves traffic while the maintainer's laptop is on. Great for interviews / recorded demos, not always-on.
 
-### Vercel (frontend)
+### Alternative: Render.com (persistent, free-tier limited)
 
-- Import the repo in Vercel with **Root Directory** = `frontend`.
-- Set `NEXT_PUBLIC_API_BASE_URL` to your Render URL, e.g. `https://object-detection-api.onrender.com`.
-- Auto-deploys on every push.
+- [`render.yaml`](render.yaml) is a Render Blueprint that provisions the Docker web service with the right env vars in one click.
+- Render free tier: 512 MB RAM, sleeps after 15 min idle. `/health`, `/docs`, and `/metrics/*` all work; running inference at scale needs the Starter plan ($7/mo, 2 GB) because torch + a loaded model exceeds 512 MB.
+- Auto-redeploys on every push to `main`.
 
 ### AWS ECS Fargate (CloudFormation)
 

@@ -415,21 +415,46 @@ Run everything: `pytest -v`.
 
 ## 10. Deployment story
 
+### 10.1 Current live setup
+
+| Component | URL | Notes |
+|---|---|---|
+| Frontend | <https://object-detection-api-psi.vercel.app> | Vercel Hobby, always on |
+| Backend | <https://unnecessarily-menispermaceous-rickey.ngrok-free.dev> | Local `uvicorn` behind an ngrok Free tunnel; live only when the maintainer's laptop is on |
+| Swagger | `/docs` on the backend URL | |
+
+**Why this shape**: PyTorch loaded in memory + a YOLO inference blows
+past the 512 MB ceiling of every free serverless tier I evaluated
+(Render, Fly, HF Spaces Docker CPU-basic). Running the backend on my own
+machine and pushing it through an ngrok tunnel is the honest free-tier
+answer that serves real inference. `frontend/src/lib/api.ts` sends
+`ngrok-skip-browser-warning: true` on every request so ngrok's
+interstitial never corrupts JSON responses.
+
+**Rotation caveat**: ngrok Free hands out a new subdomain on every
+restart. To keep the URL stable, claim a free static domain at
+<https://dashboard.ngrok.com/domains> and run
+`ngrok http --domain=<yours>.ngrok-free.dev 8000`.
+
+### 10.2 Alternative deployment targets
+
 - **Local** — `uvicorn app.main:app --reload`. Docs at `/docs`.
 - **Docker** — GPU (`docker-compose up`) or CPU
   (`docker-compose --profile cpu up`). Multi-stage build in
-  `Dockerfile`.
-- **Render.com (default free-tier live demo)** — `render.yaml` at the
-  repo root is a Render Blueprint. Free tier (512 MB RAM, sleeps after
-  15 min idle) reliably serves YOLOv8; heavier models need the Starter
-  upgrade. See [`DEPLOY.md`](DEPLOY.md) for the full walk-through.
-- **Vercel (frontend)** — imports `frontend/` as a Next.js app. Auto-
-  deploys on every push to `main`. One env var: `NEXT_PUBLIC_API_BASE_URL`.
+  `Dockerfile`, honours `$PORT`.
+- **Render.com (persistent, free-tier limited)** — `render.yaml` at the
+  repo root is a Render Blueprint. Free tier serves health/docs/metrics
+  but 502s on inference (OOM); Starter ($7/mo, 2 GB) fixes that.
+- **Vercel (frontend)** — imports `frontend/` as a Next.js app,
+  auto-deploys on every push to `main`. Single required env var:
+  `NEXT_PUBLIC_API_BASE_URL`.
 - **AWS ECS Fargate** — `deployment/aws/deploy.sh` builds the
   CloudFormation stack (VPC → ALB → ECS Fargate).
 - **Kubernetes** — manifests in `deployment/k8s/` (Deployment, Service,
   Ingress, HPA). Readiness/liveness probes hit `/health` (never triggers
   weight loading — safe for orchestrators).
+
+Full walk-through: [`DEPLOY.md`](DEPLOY.md).
 
 ---
 

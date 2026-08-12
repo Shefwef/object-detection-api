@@ -2,6 +2,9 @@
 
 Next.js 15 + TypeScript + Tailwind UI for the [FastAPI backend](../README.md).
 
+**Live demo:** <https://object-detection-api-psi.vercel.app>
+(backend served over an ngrok tunnel — see [`../DEPLOY.md`](../DEPLOY.md)).
+
 Three pages:
 
 - **`/`** — upload an image, pick any subset of models (YOLOv8, Detectron2, Grounding DINO, G-DINO + SAM pipeline), see annotated bounding boxes plus a detections table.
@@ -23,9 +26,14 @@ The FastAPI backend must be running on `localhost:8000` (see the root README). R
 
 | Var | Purpose | Default |
 |---|---|---|
-| `NEXT_PUBLIC_API_BASE_URL` | Where browser calls go. Point at the deployed FastAPI URL in production. | `/api/backend` |
+| `NEXT_PUBLIC_API_BASE_URL` | Where browser calls go. Point at the deployed FastAPI URL in production (ngrok tunnel or Render URL). | `/api/backend` |
 | `NEXT_PUBLIC_API_KEY` | Sent as `X-API-Key` if the backend has `AUTH_ENABLED=true`. | *(empty)* |
 | `API_PROXY_TARGET` | Dev-only. Backend URL the rewrite forwards to. | `http://localhost:8000` |
+
+`src/lib/api.ts` also injects the `ngrok-skip-browser-warning: true`
+header on every request so responses aren't replaced by ngrok's
+browser interstitial. Ignored by every non-ngrok server, so safe to
+send unconditionally.
 
 ## Production build
 
@@ -38,10 +46,13 @@ npm start
 
 1. Push `frontend/` to GitHub (already done as part of this monorepo).
 2. Import the repository in Vercel; set **Root Directory** to `frontend`.
-3. Add the environment variable `NEXT_PUBLIC_API_BASE_URL` pointing at your Render backend, e.g. `https://object-detection-api.onrender.com`.
+3. Add the environment variable `NEXT_PUBLIC_API_BASE_URL`:
+   - For the live setup: your ngrok URL, e.g. `https://unnecessarily-menispermaceous-rickey.ngrok-free.dev`
+   - For a Render backend: `https://object-detection-api.onrender.com`
 4. Deploy. Vercel will auto-redeploy on every push to `main`.
+5. In **Settings → Deployment Protection**, toggle **Vercel Authentication → Off** so the site is publicly reachable.
 
-See [`../DEPLOY.md`](../DEPLOY.md) for the end-to-end walk-through (Render backend + Vercel frontend, both free tier).
+See [`../DEPLOY.md`](../DEPLOY.md) for the full walk-through (Vercel + local backend via ngrok, or Vercel + Render).
 
 ## Structure
 
@@ -62,7 +73,7 @@ src/
 │   ├── DetectionTable.tsx
 │   └── StatChip.tsx
 └── lib/
-    ├── api.ts              # fetch wrapper for every endpoint
+    ├── api.ts              # fetch wrapper for every endpoint (adds ngrok bypass header)
     ├── types.ts            # TS mirrors of the FastAPI schemas
     ├── colors.ts           # bounding-box palette
     └── env.ts              # centralised env-var access

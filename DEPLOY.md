@@ -1,196 +1,254 @@
-# Deploy — Render (backend) + Vercel (frontend)
+# Deploy
 
-End-to-end walk-through to ship this project as a public live demo on
-free tiers only.
+End-to-end walk-through to ship this project as a public demo on **free
+tiers only**. Two supported paths — the recommended one (currently live)
+plus a persistent alternative when you need it.
 
-- **Backend** → Render.com free web service (Docker, 512 MB RAM, sleeps
-  after 15 min idle, no credit card).
-- **Frontend** → Vercel free Hobby tier (Next.js, auto-deploys on push).
-- **CI** → Render redeploys automatically on every push to `main`;
-  Vercel does the same for the frontend.
+- **Current live setup**: Vercel (frontend) + local FastAPI exposed via
+  **ngrok** (backend). Serves full-fat inference. Requires your laptop
+  to be on.
+- **Alternative**: Vercel (frontend) + **Render.com** (backend). Always
+  on. Free tier can serve health/docs/metrics but OOMs on real inference
+  (`/api/v1/yolo/detect` etc.) — upgrade to Render Starter ($7/mo, 2 GB
+  RAM) for the full stack.
 
-Total setup time on clean accounts: **10–15 min**. Cost: **$0/month**.
-
----
-
-## 0. Prerequisites
-
-- The repo is pushed to GitHub on `main`.
-- You have a Render account: <https://render.com> (sign in with GitHub — no card required).
-- You have a Vercel account: <https://vercel.com> (sign in with GitHub — no card required).
+Total setup time from a clean machine: **~15 min** for the ngrok path,
+**~10 min** for the Render path.
 
 ---
 
-## 1. Deploy the backend to Render
+## Live URLs (current deployment)
 
-### Option A · One-click via Blueprint (recommended)
-
-`render.yaml` at the repo root describes the service, so Render sets
-everything up for you.
-
-1. Sign in at <https://dashboard.render.com>.
-2. Click **New → Blueprint**.
-3. Connect your GitHub account (first time only) and pick this repo.
-4. Render reads `render.yaml`, shows a summary (**web service · Docker · free plan**), and asks you to name the Blueprint. Accept the defaults.
-5. Click **Apply**.
-
-Render will now:
-- Build the Docker image from your `Dockerfile` (~5–8 min the first time).
-- Start the container listening on `$PORT` (Render sets it to `10000`).
-- Assign a public URL: `https://object-detection-api.onrender.com` (if the name is taken, Render appends a random suffix).
-
-### Option B · Manual web service (if you prefer clicking through)
-
-If Blueprint doesn't detect `render.yaml`, do it by hand:
-
-1. **New → Web Service** → pick your GitHub repo.
-2. Fill in:
-   - **Name**: `object-detection-api`
-   - **Region**: Oregon (or nearest to you)
-   - **Branch**: `main`
-   - **Runtime**: **Docker**
-   - **Dockerfile Path**: `./Dockerfile`
-   - **Plan**: **Free**
-   - **Health Check Path**: `/health`
-3. Under **Environment**, add these variables (same list as `render.yaml`):
-
-   | Key | Value |
-   |---|---|
-   | `DEVICE` | `cpu` |
-   | `LOG_JSON` | `true` |
-   | `LOG_LEVEL` | `INFO` |
-   | `CACHE_ENABLED` | `true` |
-   | `INFERENCE_CACHE_TTL` | `3600` |
-   | `METRICS_ENABLED` | `true` |
-   | `AUTH_ENABLED` | `false` |
-   | `CORS_ORIGINS` | `*` *(narrow later)* |
-   | `YOLO_MODEL_NAME` | `yolov8n.pt` |
-
-4. **Create Web Service**.
-
-## 2. Verify the backend
-
-Once the Render dashboard shows **Live** (green dot), open:
-
-- `https://<your-service>.onrender.com/` — should return API metadata + feature flags.
-- `https://<your-service>.onrender.com/health` — should return `{"status":"healthy", ...}`.
-- `https://<your-service>.onrender.com/docs` — Swagger UI loads.
-
-**First `/api/v1/yolo/detect` call downloads YOLOv8n weights (~6 MB)** —
-expect 5–15 s. Subsequent calls are hot.
-
-### What works on free tier (512 MB RAM)
-
-| Endpoint | Free-tier status |
+| Component | URL |
 |---|---|
-| `/api/v1/yolo/detect` (all variants) | ✅ works |
-| `/api/v1/yolo/detect-base64` | ✅ works |
-| `/api/v1/metrics/summary` and `/recent` | ✅ works |
-| `/api/v1/explain/gradcam` | ✅ works (uses saliency fallback) |
-| `/api/v1/grounding-dino/detect` | ⚠️ may OOM (needs ~1 GB) |
-| `/api/v1/detectron2/detect` | ❌ Detectron2 not installed in the image |
-| `/api/v1/sam/segment-*` | ⚠️ may OOM (needs ~1 GB) |
-| `/api/v1/pipeline/detect-and-segment` | ⚠️ depends on both DINO + SAM |
+| Frontend | <https://object-detection-api-psi.vercel.app> |
+| Backend | <https://unnecessarily-menispermaceous-rickey.ngrok-free.dev> |
+| Swagger docs | <https://unnecessarily-menispermaceous-rickey.ngrok-free.dev/docs> |
+| Health probe | <https://unnecessarily-menispermaceous-rickey.ngrok-free.dev/health> |
+| Metrics | <https://unnecessarily-menispermaceous-rickey.ngrok-free.dev/api/v1/metrics/summary> |
 
-If you need everything, upgrade Render to **Starter ($7/mo, 2 GB RAM)** —
-no code changes required.
-
----
-
-## 3. Deploy the frontend to Vercel
-
-1. Sign in at <https://vercel.com>.
-2. **Add New → Project → Import Git Repository** → pick this repo.
-3. **Root Directory**: set to `frontend` (very important — the repo isn't a Next.js app at its root).
-4. Framework: Vercel auto-detects **Next.js**.
-5. **Environment Variables** — add one:
-
-   | Name | Value |
-   |---|---|
-   | `NEXT_PUBLIC_API_BASE_URL` | `https://<your-render-service>.onrender.com` |
-
-6. Click **Deploy**.
-
-Vercel gives you a URL like `https://object-detection-studio.vercel.app`.
-Every subsequent push to `main` auto-redeploys.
+Because ngrok Free hands out a new subdomain on every restart, the
+backend URL above may rotate. If the site can't reach the backend, refer
+to *Path A · Step 5* below for how to update the Vercel env after
+restarting the tunnel.
 
 ---
 
-## 4. Lock down CORS (recommended)
+## Path A · Vercel + local backend via ngrok (recommended, always free)
 
-Now that you know your Vercel URL, tighten the backend so it only accepts
-requests from your frontend.
+### Prerequisites
 
-1. Render dashboard → your service → **Environment** tab.
-2. Edit `CORS_ORIGINS`:
-   ```
-   CORS_ORIGINS=https://object-detection-studio.vercel.app
-   ```
-3. Click **Save, rebuild, and deploy**.
+- Python 3.11+ (`py --version`)
+- Node 20+ (only needed if you'll deploy the frontend yourself; not
+  needed to point the existing Vercel deployment at your ngrok URL)
+- A free ngrok account: <https://dashboard.ngrok.com/signup>
+- A free Vercel account: <https://vercel.com>
 
-Render redeploys in ~2 min. Verify from the browser that your frontend
-still talks to the API.
+### Step 1 · Install backend dependencies
+
+```powershell
+py -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+pip install fastapi==0.115.6 uvicorn[standard]==0.34.0 python-multipart==0.0.19 `
+            pydantic==2.10.4 pydantic-settings==2.7.1 opencv-python-headless==4.10.0.84 `
+            numpy==1.24.3 Pillow structlog
+pip install torch==2.1.0 torchvision==0.16.0 --index-url https://download.pytorch.org/whl/cpu
+pip install ultralytics
+```
+
+Skips Detectron2 (source build, ~20 min) and Grounding DINO/SAM (large
+downloads). YOLO alone is enough for the primary demo; add the others
+later with:
+
+```powershell
+pip install transformers                                          # Grounding DINO
+pip install "git+https://github.com/facebookresearch/segment-anything.git"   # SAM
+```
+
+If PowerShell refuses to run `Activate.ps1`, run this once and retry:
+
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
+```
+
+### Step 2 · Configure `.env` and start the backend
+
+Copy the example, then edit:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+Set at minimum:
+
+```
+DEVICE=cpu
+CORS_ORIGINS=https://object-detection-api-psi.vercel.app
+AUTH_ENABLED=false
+LOG_JSON=false
+```
+
+Replace `CORS_ORIGINS` with your own Vercel URL. Start the backend:
+
+```powershell
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+Leave this terminal running. In a **second** PowerShell window, verify:
+
+```powershell
+curl.exe http://localhost:8000/health
+```
+
+Expect `{"status":"healthy",...}`.
+
+### Step 3 · Install ngrok and add your token
+
+```powershell
+# Any one of:
+winget install ngrok.ngrok
+choco install ngrok
+# …or download from https://ngrok.com/download and add to PATH
+```
+
+Then paste your token from
+<https://dashboard.ngrok.com/get-started/your-authtoken>:
+
+```powershell
+ngrok config add-authtoken YOUR_TOKEN_HERE
+```
+
+### Step 4 · Start the tunnel
+
+In a **third** PowerShell window:
+
+```powershell
+ngrok http 8000
+```
+
+ngrok prints something like:
+
+```
+Forwarding  https://<something>.ngrok-free.dev -> http://localhost:8000
+```
+
+Copy that HTTPS URL. Verify from any terminal:
+
+```powershell
+curl.exe -H "ngrok-skip-browser-warning: true" https://<something>.ngrok-free.dev/health
+```
+
+Should return the health JSON.
+
+> ⚠️ ngrok Free's URL changes on every restart. If you don't want to
+> update Vercel every time, get a **static domain** free from
+> <https://dashboard.ngrok.com/domains> (one per account) and run:
+> `ngrok http --domain=my-static-domain.ngrok-free.dev 8000`.
+
+### Step 5 · Point Vercel at the tunnel
+
+1. <https://vercel.com/dashboard> → your project → **Settings →
+   Environment Variables**.
+2. Edit `NEXT_PUBLIC_API_BASE_URL` (or add it if missing):
+   - Value: your ngrok HTTPS URL (no trailing slash)
+   - Environments: **Production**, **Preview**, **Development** (all three)
+3. Save.
+4. **Deployments** tab → three-dot menu on the latest deployment →
+   **Redeploy** → uncheck "Use existing build cache" → **Redeploy**.
+
+Wait ~90 s for the new build.
+
+### Step 6 · Turn off Vercel Deployment Protection (once)
+
+Otherwise the site is only visible to your Vercel account.
+
+1. Vercel project → **Settings → Deployment Protection**
+2. **Vercel Authentication** → toggle **Off** (or "Only Preview
+   Deployments" if you want a preview firewall)
+3. Save
+
+### Step 7 · Smoke test
+
+Open the Vercel URL. Drop any image, tick **YOLOv8**, click **Run
+detection**. First call takes 10–15 s because ultralytics downloads
+`yolov8n.pt`. Subsequent calls are instant (cached).
 
 ---
 
-## 5. Optional — turn on API-key auth for production
+## Path B · Vercel + Render.com (always-on, free-tier limited)
 
-1. Render env:
-   ```
-   AUTH_ENABLED=true
-   API_KEYS=demo-key-12345,another-prod-key
-   RATE_LIMIT_PER_MINUTE=30
-   ```
-2. Vercel env: `NEXT_PUBLIC_API_KEY=demo-key-12345`. Redeploy.
-3. The middleware still keeps `/health`, `/docs`, `/redoc`, `/openapi.json`, and `/` open, so probes + Swagger keep working.
+### Step 1 · Create the Render service
+
+Two ways:
+
+- **One-click Blueprint** (recommended): sign in at
+  <https://dashboard.render.com> → **New → Blueprint** → connect this
+  repo → **Apply**. Render reads `render.yaml` and provisions the Docker
+  web service with the correct env vars.
+- **Manual**: **New → Web Service** → pick this repo → runtime **Docker**,
+  branch `main`, plan **Free**, health check `/health`. Add the env vars
+  listed under *Environment variable summary* below.
+
+### Step 2 · Wait for the first build (~5–8 min)
+
+Render clones the repo, builds the image, and starts the container. The
+**Live** badge appears when `/health` returns 200.
+
+### Step 3 · Point Vercel at the Render URL
+
+Same as *Path A · Step 5* but the value is `https://<your-service>.onrender.com`.
+
+### Step 4 · Lock down CORS
+
+Render dashboard → your service → **Environment** → edit
+`CORS_ORIGINS` to your Vercel origin (no trailing slash). Save; Render
+redeploys automatically.
+
+### Known limitation
+
+Render's free plan gives 512 MB RAM. With torch loaded (~400 MB) plus a
+YOLO inference, the container OOMs and returns `502 Bad Gateway`.
+Health, docs, root, and the metrics endpoints keep working. To serve
+real inference on Render, upgrade to Starter ($7/mo, 2 GB RAM) — same
+code, no changes required.
 
 ---
 
 ## Environment variable summary
 
-### Render (backend)
+### Backend
 
-Required — set via `render.yaml` or Render dashboard:
+Set in your local `.env` (Path A) or the Render dashboard (Path B).
 
-| Var | Value | Notes |
+| Variable | Default / Recommended | Purpose |
 |---|---|---|
-| `DEVICE` | `cpu` | Skip CUDA probe |
-| `LOG_JSON` | `true` | Structured logs |
+| `DEVICE` | `cpu` | Force CPU on hosts without CUDA |
+| `LOG_JSON` | `true` | Structured JSON logs |
 | `LOG_LEVEL` | `INFO` | |
-| `CACHE_ENABLED` | `true` | |
+| `CACHE_ENABLED` | `true` | In-memory inference cache |
 | `INFERENCE_CACHE_TTL` | `3600` | Cache TTL seconds |
-| `METRICS_ENABLED` | `true` | |
-| `AUTH_ENABLED` | `false` | Set `true` for prod |
-| `CORS_ORIGINS` | `*` → then Vercel URL | Lock down after step 4 |
-| `YOLO_MODEL_NAME` | `yolov8n.pt` | Smallest to fit free tier |
+| `METRICS_ENABLED` | `true` | Records per-model latency/throughput |
+| `AUTH_ENABLED` | `false` | Turn on API-key auth |
+| `API_KEYS` | *(unset)* | Comma-separated valid keys when auth on |
+| `RATE_LIMIT_PER_MINUTE` | `60` | Per-key/IP fixed window |
+| `CORS_ORIGINS` | `*` → your Vercel origin | Lock down after go-live |
+| `YOLO_MODEL_NAME` | `yolov8n.pt` | Smallest, works on 512 MB Render |
+| `REDIS_URL` | *(unset)* | Optional — swap cache backend to Redis |
+| `MONGO_URL` | *(unset)* | Optional — persist metrics to Mongo |
 
-Optional (only if you attach managed backends):
+### Frontend (Vercel)
 
-| Var | Value |
+| Variable | Value |
 |---|---|
-| `API_KEYS` | Comma-separated valid keys |
-| `RATE_LIMIT_PER_MINUTE` | `60` |
-| `REDIS_URL` | `redis://…` from Upstash / Render Redis |
-| `MONGO_URL` | `mongodb+srv://…` from Atlas |
-
-Render sets `PORT` automatically — the Dockerfile honours `$PORT`, so
-you never need to set it manually.
-
-### Vercel (frontend)
-
-| Var | Value |
-|---|---|
-| `NEXT_PUBLIC_API_BASE_URL` | Your Render URL, e.g. `https://object-detection-api.onrender.com` |
-| `NEXT_PUBLIC_API_KEY` | *(only if `AUTH_ENABLED=true` on backend)* |
+| `NEXT_PUBLIC_API_BASE_URL` | Your ngrok URL (Path A) or Render URL (Path B). No trailing slash. |
+| `NEXT_PUBLIC_API_KEY` | Only when the backend has `AUTH_ENABLED=true` |
 
 ### GitHub secrets
 
-**None required.** Render and Vercel both auto-deploy from the GitHub
-integration — no tokens live in the repo.
-
-### What you can delete from GitHub secrets (if you had them)
-
-- `HF_TOKEN`, `HF_USERNAME`, `HF_SPACE_NAME` — no longer used.
+**None required.** Vercel and Render both use GitHub OAuth for deploys.
+If you experimented with the earlier HF Spaces workflow, you can delete
+`HF_TOKEN`, `HF_USERNAME`, `HF_SPACE_NAME` from the repo secrets.
 
 ---
 
@@ -198,23 +256,22 @@ integration — no tokens live in the repo.
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| Build fails on Render with `Cannot find requirements` | Wrong branch selected | Confirm the service tracks `main` |
-| Container starts then exits with SIGTERM | OOM on 512 MB — heavy model got called | Only call `/api/v1/yolo/*` on free tier; upgrade to Starter for others |
-| `502 Bad Gateway` for ~30 s after 15 min idle | Free tier sleeps — first request wakes it | Wait and retry; upgrade to remove sleep |
-| CORS error in browser after step 4 | `CORS_ORIGINS` mistyped (trailing slash, http vs https) | Copy the exact Vercel origin — no trailing slash |
-| Frontend fetches fail with `404` at `/api/backend/...` | Missing `NEXT_PUBLIC_API_BASE_URL` on Vercel | Set it to the absolute Render URL and redeploy |
-| First model call takes 15 s | YOLOv8 weight download | Normal on first call; cached thereafter |
-| `429 Too Many Requests` | Rate limit hit | Raise `RATE_LIMIT_PER_MINUTE` or turn off auth |
+| Vercel URL bounces to a login page | Deployment Protection is on | Settings → Deployment Protection → turn off Vercel Authentication |
+| Frontend can't reach backend, CORS error in devtools | Backend `CORS_ORIGINS` still `*` (some browsers block credentialled `*`) or wrong origin | Set `CORS_ORIGINS` to the exact Vercel URL, no trailing slash |
+| Frontend fetch returns an HTML page | ngrok interstitial is being served | Confirm the `ngrok-skip-browser-warning` header is being sent (already patched in `frontend/src/lib/api.ts`) |
+| First YOLO call takes 15 s | Ultralytics is downloading `yolov8n.pt` | Normal on first call; cached after |
+| Render returns 502 on `/api/v1/*/detect` | Container OOM (512 MB tier) | Upgrade to Starter, or use Path A |
+| ngrok URL changed after restart | Free tier gives ephemeral subdomains | Claim your free static domain at <https://dashboard.ngrok.com/domains> and use `ngrok http --domain=... 8000` |
+| `429 Too Many Requests` | Rate limit tripped | Bump `RATE_LIMIT_PER_MINUTE` or turn off auth |
 
 ---
 
 ## Cost summary
 
-- **Render web service (free)**: $0. Sleeps after 15 min idle, ~30 s cold start.
-- **Render web service (Starter)**: $7/mo — 2 GB RAM, no sleep, all models fit.
-- **Vercel Hobby**: $0.
-- **Upstash Redis free**: 10 k commands/day.
-- **MongoDB Atlas M0**: 512 MB shared cluster, $0.
+- **Vercel Hobby**: $0/month.
+- **ngrok Free**: $0/month. 1 GB egress / month, 1 static domain, 4 tunnels concurrently.
+- **Render Free web service**: $0/month. 512 MB RAM, sleeps after 15 min idle.
+- **Render Starter web service**: $7/month. 2 GB RAM, no sleep. Recommended if you need always-on inference.
+- Upstash Redis free / MongoDB Atlas M0: both $0 for demo workloads.
 
-Permanent free demo: **$0/month** with cold starts.
-Always-on with every model working: **$7/month** (Render Starter upgrade).
+Total for the current live setup: **$0/month** (Vercel + ngrok).
